@@ -1,0 +1,36 @@
+{
+    "environment": "local",
+    "project_name": "doq_be",
+    "api_v1_str": "/api/v1",
+    "host": "localhost",
+    "port": 3000,
+    "secret_key": "changethis-secret-key",
+    "access_token_expire_minutes": 1440,
+
+    "http_config": {
+      "allow_origins": ["http://localhost:8000"],
+      "allow_methods": ["*"],
+      "allow_headers": ["*"],
+      "allow_credentials": true
+    },
+    
+    "llm": {
+      "models": {
+        "default": {
+          "provider": "ollama",
+          "model": "llama3.2"
+        }
+      }
+    },
+    
+    "logger": {
+        "level": "debug",
+        "path": "./logs/doq_be.log-%DATE%",
+        "suffix": "%Y-%m-%d",
+        "max_bytes": 10485760,
+        "max_files": "3d",
+        "rotation": "daily",
+        "use_console": true
+    }  
+}
+  

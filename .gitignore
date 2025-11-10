@@ -1,0 +1,21 @@
+# 가상환경
+/py_env/
+
+# 로그 디렉토리
+/logs/
+
+# 파이썬 캐시 파일 및 컴파일된 바이트코드
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyc
+
+# # 기타 환경 설정 캐시
+# *.log
+# *.db
+# *.sqlite3
+
+# # IDE/에디터 관련 (선택)
+# .vscode/
+# .idea/
+*.gguf

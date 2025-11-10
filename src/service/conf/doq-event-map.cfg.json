@@ -1,0 +1,44 @@
+{
+  "Ankoko": {
+    "redis": {
+      "test-pong":   {
+        "stream_key": "ankoko:ai:stream",
+        "handler": "src.service.scripts.health_check.get_pong"
+      }
+    },
+    "ws": {
+      "ping":   {
+        "websocket": "/v1/analyze/stream",
+        "handler": "src.service.scripts.client_chat_service.handle_ping"
+      },
+      "analyze-stream": {
+        "websocket": "/v1/analyze/stream",
+        "handler": "src.service.scripts.cli_analyze_run.handle_analyze_stream"
+      }
+    },
+    "rmq": {
+      "analyze-stream": {
+        "queue_name": "ankoko-from-algo",
+        "handler": "src.service.scripts.cli_analyze_service.handle_analyze_stream_response"
+      }
+    }
+  },
+  "ankoko-ai-server": {
+    "redis": {
+      "test-ping": {
+        "stream_key": "ankoko:ai:stream",
+        "handler": "src.service.scripts.health_check.handle_ping_pong"
+      },
+      "analyze-stream": {
+        "stream_key": "ankoko:ai:stream",
+        "handler": "src.service.scripts.ai_analyze_service.analyze_stream_handler"
+      }
+    },
+    "rmq": {
+      "analyze-stream": {
+        "queue_name": "ankoko-to-algo",
+        "handler": "src.service.scripts.ai_analyze_service.analyze_stream_handler"
+      }
+    }
+  }
+}
