@@ -6,6 +6,8 @@ from fastapi import APIRouter, WebSocket
 from src.service.messaging.ws_processor import processor
 from src.utils.chat_stream_utils import store_chat_message
 
+from src.service.ai.asset.prompts.prompts_cfg import SYSTEM_PROMPTS
+
 router = APIRouter(prefix="/v1/session", tags=["Session"])
 
 async def handle_user_message(ctx, websocket, msg: dict):
@@ -32,6 +34,7 @@ async def handle_user_message(ctx, websocket, msg: dict):
         }
         
         return response
+    
     except Exception as e:
         ctx.log.error("WS", f"-- User message handling error: {e}")
         sid = msg.get("sid", "unknown")
@@ -58,12 +61,18 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         ctx.log.debug("WS", f"-- Message: {msg}")
         
         # TODO: 실제 LLM 호출 구현
-        # llm_result = await ctx.llm_manager['default'].generate(...)
-        
+        resp_text = await ctx.llm_manager.generate(
+            SYSTEM_PROMPTS,
+            placeholders = {
+                'user_name': participant,
+            },
+            temperature=0.7
+        )
+
         # 현재는 mock 응답만 반환
         llm_response = {
             "hd": {"event": "llm.response", "role": "llm"},
-            "bd": {"text": "LLM 응답 (구현 예정)"},
+            "bd": {"text": resp_text},
             "sid": sid,
             "participant": "llm"
         }
@@ -72,6 +81,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         await store_chat_message(ctx, sid, "llm", llm_response)
         
         return llm_response
+    
     except Exception as e:
         ctx.log.error("WS", f"-- LLM invocation error: {e}")
         sid = msg.get("sid", "unknown")

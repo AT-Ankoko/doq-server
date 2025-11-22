@@ -15,12 +15,8 @@
     },
     
     "llm": {
-      "models": {
-        "default": {
-          "provider": "ollama",
-          "model": "llama3.2"
-        }
-      }
+      "provider": "gemini",
+      "model": "gemini-2.0-flash-lite"
     },
     
     "redis": {

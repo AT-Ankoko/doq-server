@@ -12,11 +12,14 @@ from pydantic import BaseModel
 from typing import Any
 from typing import Optional
 
+import modules.logger as logger
+
 from src.modules.system_monitor import SystemMonitor
 from src.handler.websocket_handler import WebSocketHandler
 from src.handler.redis_handler import RedisHandler
 from src.handler.redis_stream_consumer import RedisStreamConsumer
-import modules.logger as logger
+
+from service.ai.llm_manager import LLMManager
 
 class LoggerConfig(BaseModel):
     level: str
@@ -44,12 +47,9 @@ class RedisConsumerConfig(BaseModel):
     group_name: Optional[str]
     consumer_name: Optional[str]
     
-class LLMModelConfig(BaseModel):
-    provider: str
-    model: str
-
 class LLMConfig(BaseModel):
-    models: dict[str, LLMModelConfig]
+    provider: str           # "ollama" | "openai" | ...
+    model: str              # "llama3.2" 등
 
 class AppConfig(BaseModel):
     # 상위 항목 직접 정의
@@ -89,7 +89,7 @@ class AppContext:
         self.system_monitor = None
 
         # 서비스
-        self.llm_manager = {}
+        self.llm_manager: Optional[LLMManager] = None
 
     def load_config(self, path: str) -> AppConfig:
         """JSON 파일을 로드하고 AppConfig 모델로 파싱"""
@@ -159,36 +159,28 @@ class AppContext:
 
         self.log.debug("- end init system manager")
 
+
     def _init_llms(self):
+        if not self.cfg or not getattr(self.cfg, "llm", None):
+            if self.log:
+                self.log.warning("[LLM] llm config missing; skipping LLM init")
+            return
+
         self.log.debug("+ start init LLMs")
 
-        self.llm_manager = {}
+        try:
+            # provider 직접 주입
+            self.llm_manager = LLMManager(
+                ctx=self,
+                provider=self.cfg.llm.provider,
+                model=self.cfg.llm.model
+            )
+            if self.log:
+                self.log.info(f"[LLM] manager ready (model={self.cfg.llm.model})")
+        except Exception as e:
+            if self.log:
+                self.log.error(f"[LLM] init failed: {e}")
+            raise
 
-        if self.cfg.llm:
-            from src.service.ai.llm_manager import LLMManager
-
-            for cls in LLMManager.__subclasses__():
-                model_key = getattr(cls, "model_key", None)
-                manager_key = getattr(cls, "manager_key", None)
-
-                if not model_key or not manager_key:
-                    self.log.warning(f"[LLM]     !! {cls.__name__} missing model_key or manager_key")
-                    continue
-
-                if model_key not in self.cfg.llm.models:
-                    self.log.warning(f"[LLM]     !! No model config found for model_key '{model_key}'")
-                    continue
-
-                instance = cls(self)
-                try:
-                    instance.init()
-                    self.llm_manager[manager_key] = instance
-                    self.log.debug(f"[LLM]     - Registered LLM manager '{manager_key}' using model '{model_key}' ({cls.__name__})")
-                except Exception as e:
-                    self.log.error(f"[LLM]     !! Failed to init {cls.__name__}: {e}")
-        else:
-            self.log.warning("[LLM]     !! No LLM config found")
-
-        self.log.debug("- end init LLMs")
 
     # TODO _destroy() 메서드 추가
