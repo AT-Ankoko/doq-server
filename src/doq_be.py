@@ -106,6 +106,7 @@ class AppFactory:
             await AppFactory._initialize_managers(ctx)
             await AppFactory._initialize_handlers(ctx)
             await AppFactory._initialize_algorithms(ctx)
+            await AppFactory._setup_connections(ctx)
             
             ctx.log.info("     == Initialization complete")
 
@@ -130,16 +131,26 @@ class AppFactory:
     async def _initialize_handlers(ctx: AppContext) -> None:
         """핸들러 초기화"""    
         ctx.log.info("     - Initializing handlers...")
-        # ctx._init_websocket()
-        # ctx._init_firebase()
-        # ctx._init_redis()
-        # ctx._init_redis_consumer()
+        ctx._init_websocket()
+        ctx._init_redis()
+        ctx._init_redis_consumer()
 
     @staticmethod
     async def _initialize_algorithms(ctx: AppContext) -> None:
         """알고리즘 초기화"""
         print("     - Initializing algorithms...")   
         ctx._init_llms()
+
+    @staticmethod
+    async def _setup_connections(ctx: AppContext) -> None:
+        """외부 서비스 연결 설정"""
+        # Redis 연결
+        await ctx.redis_handler.connect()
+        await ctx.redis_consumer.init_group()
+        
+        ctx.redis_consumer_task = asyncio.create_task(ctx.redis_consumer.consume())
+        await asyncio.sleep(0)  # 태스크가 시작되도록 제어권 양보   
+
     
     @staticmethod
     async def _shutdown(app: FastAPI) -> None:
@@ -148,6 +159,45 @@ class AppFactory:
 
         if hasattr(ctx, 'log') and ctx.log:
             ctx.log.info("     -- Shutting down application")
+
+        # Redis 종료
+        if hasattr(ctx, "redis_consumer") and ctx.redis_consumer:
+            try:
+                await ctx.redis_consumer.stop()
+                ctx.log.info("     -- RedisStreamConsumer stopped")
+            except Exception as e:
+                ctx.log.warning(f"     - RedisStreamConsumer stop failed: {e}")
+        if ctx.redis_handler:
+            try:
+                await ctx.redis_handler.disconnect()
+                ctx.log.info("     -- Redis handler closed")
+            except Exception as e:
+                ctx.log.warning(f"     - Redis close failed: {e}")
+
+        # WebSocket 종료
+        if ctx.ws_handler:
+            try:
+                await ctx.ws_handler.disconnect_all()
+                ctx.log.info("     -- WebSocket handler closed")
+            except Exception as e:
+                ctx.log.warning(f"     - WebSocket close failed: {e}")
+
+        # 모니터링 종료
+        if ctx.system_monitor:
+            try:
+                ctx.system_monitor.stop()
+                ctx.log.info("     -- system monitor stopped")
+            except Exception as e:
+                ctx.log.warning(f"     - system monitor stop failed: {e}")
+
+        # LLM 모델 정리
+        # if hasattr(ctx, "llm_models") and ctx.llm_models:
+        #     try:
+        #         for name, model in ctx.llm_models.items():
+        #             ctx.log.info(f"     -- LLM model '{name}' unloaded (model={getattr(model, 'model', 'unknown')})")
+        #         ctx.llm_models.clear()
+        #     except Exception as e:
+        #         ctx.log.warning(f"     - LLM models cleanup failed: {e}")
 
     @staticmethod
     def _test_logging(logger) -> None:
@@ -164,4 +214,4 @@ app = AppFactory.create_app()
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("src.doq_be:app", host="0.0.0.0", port=3000, reload=True)
+    uvicorn.run("src.doq_be:app", host="0.0.0.0", port=9571, reload=True)

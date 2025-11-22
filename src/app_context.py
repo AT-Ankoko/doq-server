@@ -13,6 +13,9 @@ from typing import Any
 from typing import Optional
 
 from src.modules.system_monitor import SystemMonitor
+from src.handler.websocket_handler import WebSocketHandler
+from src.handler.redis_handler import RedisHandler
+from src.handler.redis_stream_consumer import RedisStreamConsumer
 import modules.logger as logger
 
 class LoggerConfig(BaseModel):
@@ -29,6 +32,17 @@ class HTTPConfig(BaseModel):
     allow_methods: list[str]
     allow_headers: list[str]
     allow_credentials: bool
+
+class RedisConfig(BaseModel):
+    host: Optional[str]
+    port: Optional[int]
+    db: Optional[int]
+    password: Optional[str] = None
+
+class RedisConsumerConfig(BaseModel):
+    stream_key: Optional[str]
+    group_name: Optional[str]
+    consumer_name: Optional[str]
     
 class LLMModelConfig(BaseModel):
     provider: str
@@ -50,6 +64,8 @@ class AppConfig(BaseModel):
     # 구성 요소들
     logger: LoggerConfig
     http_config: Optional[HTTPConfig] = None
+    redis: Optional[RedisConfig] = None
+    redis_consumer: Optional[RedisConsumerConfig] = None
 
     # 시스템 모니터링 관련 기본값 설정
     enable_monitoring: Optional[bool] = True
@@ -65,12 +81,15 @@ class AppContext:
         self.log = None
         
         # 핸들러
+        self.ws_handler = None
+        self.redis_handler = None
+        self.redis_consumer = None
 
         # 매니저
         self.system_monitor = None
 
         # 서비스
-        # self.llm_manager = {}
+        self.llm_manager = {}
 
     def load_config(self, path: str) -> AppConfig:
         """JSON 파일을 로드하고 AppConfig 모델로 파싱"""
@@ -109,7 +128,27 @@ class AppContext:
 
         self.log.debug("- end init logger")
 
+    def _init_websocket(self):
+        self.log.debug("+ start init websocket")
+
+        self.ws_handler = WebSocketHandler(self)
+
+        self.log.debug("- end init websocket")
             
+    def _init_redis(self):
+        self.log.debug("+ start init Redis")
+
+        self.redis_handler = RedisHandler(self)
+
+        self.log.debug("- end init Redis")
+        
+    def _init_redis_consumer(self):
+        self.log.debug("+ start init RedisStreamConsumer")
+
+        self.redis_consumer = RedisStreamConsumer(self)
+        
+        self.log.debug("- end init RedisStreamConsumer")
+        
     def _init_system_manager(self):
         self.log.debug("+ start init system manager")
 
