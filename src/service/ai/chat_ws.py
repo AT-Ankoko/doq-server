@@ -30,8 +30,10 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
     """
     try:
         hd = msg.get("hd", {}) or {}
+        bd = msg.get("bd", {}) or {}
         sid = hd.get("sid") or getattr(websocket, '_sid', None) or "unknown"
         asker = hd.get("asker") or hd.get("role") or "user"
+        user_query = bd.get("text") or ""
 
         ctx.log.info("WS", f"-- LLM invocation (asker={asker}) in session {sid}")
         ctx.log.debug("WS", f"-- Message: {msg}")
@@ -72,6 +74,27 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 },
             }
             return error_msg
+
+        # 프롬프트 인젝션 탐지
+        if manager._is_prompt_injection(user_query):
+            ctx.log.warning("WS", f"-- Prompt injection detected from {asker}: {user_query}")
+            blocked_response = {
+                "hd": {
+                    "sid": sid,
+                    "event": "llm.response", 
+                    "role": "llm", 
+                    "asker": asker
+                },
+                "bd": {
+                    "text": "말씀하신 기능은 현재 제공되지 않습니다.", 
+                    "state": { 
+                        "code": codes.ResponseStatus.SUCCESS['code'],
+                        "msg": codes.ResponseStatus.SUCCESS['msg']
+                    }
+                }
+            }
+            await store_chat_message(ctx, sid, "llm", blocked_response)
+            return blocked_response
 
         # 3) 실제 LLM 호출
         try:

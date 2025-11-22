@@ -7,9 +7,11 @@ from asyncio import to_thread
 from typing import Any, Dict, List, Optional, Union
 
 from src.service.conf.gemini_api_key import GEMINI_API_KEY
+from src.service.ai.asset.prompts.doq_prompts_injection import _INJECTION_PATTERNS
 
 
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}")
+
 
 class LLMManager:
     def __init__(self, ctx, provider: str, model: str):
@@ -27,6 +29,16 @@ class LLMManager:
             self.gemini_model = genai.GenerativeModel(self.model)
         else:
             raise ValueError(f"Unsupported provider: {provider}. Supported provider is 'gemini'.")
+
+    def _is_prompt_injection(self, text: str) -> bool:
+        """
+        프롬프트 인젝션 공격 패턴 탐지
+        """
+        text_lower = text.lower()
+        for pattern in _INJECTION_PATTERNS:
+            if re.search(pattern, text_lower):
+                return True
+        return False
 
     async def retrieve(self, query: str, top_k: int = 3) -> list:
         """
@@ -52,6 +64,11 @@ class LLMManager:
         """
         RAG: 검색된 문서와 쿼리를 합쳐 LLM에 전달하여 답변 생성
         """
+        # 프롬프트 인젝션 탐지
+        if self._is_prompt_injection(query):
+            self.ctx.log.warning("LLM", f"-- Prompt injection detected: {query}")
+            return "아직 없는 기능입니다"
+        
         docs = await self.retrieve(query, top_k=top_k)
         context = "\n".join(docs)
         if not prompt_template:
@@ -75,6 +92,11 @@ class LLMManager:
     ) -> str:
         final_prompt = self._compose_prompt(prompt, placeholders=placeholders)
 
+        # 프롬프트 인젝션 탐지
+        if self._is_prompt_injection(final_prompt):
+            self.ctx.log.warning("LLM", f"-- Prompt injection detected in final_prompt")
+            return "아직 없는 기능입니다"
+
         if self.provider == "gemini":
             generation_config = genai.types.GenerationConfig(**options)
 
@@ -89,7 +111,7 @@ class LLMManager:
                 response = await to_thread(_call_gemini)
                 return response.text
             except Exception as e:
-                print(f"Gemini API 호출 중 오류 발생: {e}")
+                self.ctx.log.error("LLM", f"-- Gemini API 호출 중 오류 발생: {e}")
                 return ""
         
         return ""
