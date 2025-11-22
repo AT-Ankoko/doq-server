@@ -3,8 +3,8 @@
     "ws": {
       "chat.message": {
         "websocket": "/v1/session/chat",
-        "handler": "src.service.ai.chat_ws.handle_user_message",
-        "description": "사용자 채팅 메시지 처리"
+        "handler": "src.service.ai.chat_ws.handle_llm_invocation",
+        "description": "사용자 채팅 메시지 처리 (LLM 경유)"
       },
       "llm.invoke": {
         "websocket": "/v1/session/chat",

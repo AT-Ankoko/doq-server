@@ -14,7 +14,6 @@ class WebSocketHandler:
     async def connect(self, websocket: WebSocket, id: str = None):
         """
         websocket에 세션 id를 속성으로 붙여둡니다.
-        participant(role)는 메시지의 hd["role"] 필드에서 추출합니다.
         """
         await websocket.accept()
         self.active_connections.append(websocket)
@@ -40,21 +39,25 @@ class WebSocketHandler:
                 msg = orjson.loads(str_msg)
                 self.log.debug("WS", f">> Received message: {msg}")
 
-                # Extract session id and participant (role) from message and websocket
-                sid = getattr(websocket, "_sid", None)
+                hd = msg.get("hd", {}) if isinstance(msg.get("hd", {}), dict) else {}
+                sid = hd.get("sid") or getattr(websocket, "_sid", None)
                 
-                # participant는 msg["hd"]["role"]에서 추출, 없으면 기본값 "user"
-                hd = msg.get("hd", {})
-                participant = hd.get("role", "user") if isinstance(hd, dict) else "user"
+                role = hd.get("role", "user")
+
+                hd["asker"] = role
+                msg["hd"] = hd
 
                 if sid:
                     msg.setdefault("sid", sid)
-                msg.setdefault("participant", participant)
+                    hd["sid"] = sid
 
                 # Persist to Redis Stream for the session
                 try:
                     if sid:
-                        await store_chat_message(self.ctx, sid, participant, msg)
+                        # 저장용으로 role는 별도 인자로 전달
+                        store_msg = dict(msg)
+                        store_msg.pop("role", None)
+                        await store_chat_message(self.ctx, sid, role, store_msg)
                 except Exception as e:
                     self.log.error("WS", f"-- Failed to persist chat to stream: {e}")
 
