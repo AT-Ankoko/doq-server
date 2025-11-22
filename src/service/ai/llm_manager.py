@@ -28,6 +28,44 @@ class LLMManager:
         else:
             raise ValueError(f"Unsupported provider: {provider}. Supported provider is 'gemini'.")
 
+    async def retrieve(self, query: str, top_k: int = 3) -> list:
+        """
+        RAG용 문서 검색 (mock retrieval). 실제 구현시 벡터DB/검색엔진 연동.
+        """
+        # TODO: FAISS, Chroma, Elasticsearch 등과 연동하여 구현 가능
+        # 아래는 예시용 mock retrieval
+        return [
+            f"[MockDoc1] '{query}'와 관련된 문서1 내용.",
+            f"[MockDoc2] '{query}'와 관련된 문서2 내용.",
+            f"[MockDoc3] '{query}'와 관련된 문서3 내용."
+        ][:top_k]
+
+    async def rag_generate(
+        self,
+        query: str,
+        *,
+        prompt_template: str = None,
+        top_k: int = 3,
+        placeholders: Optional[Dict[str, Any]] = None,
+        **options
+    ) -> str:
+        """
+        RAG: 검색된 문서와 쿼리를 합쳐 LLM에 전달하여 답변 생성
+        """
+        docs = await self.retrieve(query, top_k=top_k)
+        context = "\n".join(docs)
+        if not prompt_template:
+            prompt_template = (
+                "아래의 문서와 사용자의 질문을 참고하여 답변하세요.\n"
+                "문서:\n{{context}}\n\n질문: {{query}}\n답변:"
+            )
+        rag_prompt = self._render_placeholders(prompt_template, {
+            "context": context,
+            "query": query,
+            **(placeholders or {})
+        })
+        return await self.generate(rag_prompt, **options)
+
     async def generate(
         self,
         prompt: Union[str, List[str]],
