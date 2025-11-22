@@ -66,6 +66,7 @@ class AppFactory:
         
         # 설정 로드
         ctx.load_config("src/service/conf/doq_be.local.cfg.json")
+        ctx.load_json_map("event_map", "src/service/conf/doq-event-map.cfg.json")
 
         # CORS 설정
         AppFactory._setup_cors(app, ctx)
