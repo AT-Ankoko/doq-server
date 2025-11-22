@@ -1,5 +1,5 @@
 {
-  "doq-chat": {
+  "doq-be": {
     "ws": {
       "chat.message": {
         "websocket": "/v1/session/chat",
