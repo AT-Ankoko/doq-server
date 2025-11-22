@@ -11,11 +11,18 @@ def load_handler(handler_path: str):
 
 async def dispatch_event(ctx, event, source_type, queue_name=None, **kwargs):
     project = ctx.cfg.project_name
-    mapping = ctx.event_map.get(project, {}).get(source_type, {}).get(event)
+    
+    # Debug: 이벤트 맵 구조 확인
+    ctx.log.debug(f"[{source_type.upper()}] - Event map keys: {list(ctx.event_map.keys())}")
+    
+    source_events = ctx.event_map.get(project, {}).get(source_type, {})
+    ctx.log.debug(f"[{source_type.upper()}] - Project '{project}', source_type '{source_type}' events: {list(source_events.keys())}")
+    
+    mapping = source_events.get(event)
 
     if not mapping:
         ctx.log.warning(f"[{source_type.upper()}] - No handler for event '{event}'")
-        ctx.log.debug(f"[{source_type.upper()}] - Available events: {list(ctx.event_map.get(project, {}).get(source_type, {}).keys())}")
+        ctx.log.debug(f"[{source_type.upper()}] - Available events: {list(source_events.keys())}")
         return {"status": "error", "msg": f"No handler for event: {event}"}
 
     if queue_name and mapping.get("queue") and mapping["queue"] != queue_name:
@@ -27,9 +34,13 @@ async def dispatch_event(ctx, event, source_type, queue_name=None, **kwargs):
 
     ctx.log.debug(f"[{source_type.upper()}] - Dispatching to handler: {handler_path}")
 
-    if list(kwargs.keys()) == ["msg"]:
+    # 전달된 kwargs의 키를 정렬하여 순서에 관계없이 매칭
+    kwargs_keys = sorted(list(kwargs.keys()))
+    
+    if kwargs_keys == ["msg"]:
         return await handler(ctx, kwargs["msg"])
-    elif list(kwargs.keys()) == ["websocket", "msg"]:
+    elif kwargs_keys == ["msg", "websocket"]:
+        # websocket과 msg 모두 전달
         return await handler(ctx, kwargs["websocket"], kwargs["msg"])
     else:
         return await handler(ctx, **kwargs)
