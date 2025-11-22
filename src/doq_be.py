@@ -20,6 +20,7 @@ import asyncio
 from src.app_context import AppContext
 
 from service.basic.basic_api import router as basic_router
+from service.auth.session_api import router as session_router
 
 class AppFactory:
     """애플리케이션 팩토리 클래스"""
@@ -91,6 +92,7 @@ class AppFactory:
         """라우터 등록"""
         routers = [
             basic_router,
+            session_router
         ]
         for router in routers:
             app.include_router(router)
