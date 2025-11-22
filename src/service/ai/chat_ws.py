@@ -8,7 +8,41 @@ from src.utils.chat_stream_utils import store_chat_message
 
 router = APIRouter(prefix="/v1/session", tags=["Session"])
 
-async def handle_llm_invocation(ctx, sid: str, participant: str, msg: dict):
+async def handle_user_message(ctx, websocket, msg: dict):
+    """
+    사용자 메시지를 처리합니다.
+    - 메시지 로깅
+    - Redis Stream에 저장
+    - 클라이언트에 확인 응답 전송
+    """
+    try:
+        # 메시지에서 필요한 정보 추출
+        sid = msg.get("sid", "unknown")
+        participant = msg.get("participant", "user")
+        
+        ctx.log.info("WS", f"-- User message from {participant} in session {sid}")
+        ctx.log.debug("WS", f"-- Message: {msg}")
+        
+        # 사용자 메시지 확인 응답
+        response = {
+            "hd": {"event": "chat.message.ack", "role": "server"},
+            "bd": {"status": "received"},
+            "sid": sid,
+            "participant": "server"
+        }
+        
+        return response
+    except Exception as e:
+        ctx.log.error("WS", f"-- User message handling error: {e}")
+        sid = msg.get("sid", "unknown")
+        return {
+            "hd": {"event": "chat.message.error", "role": "server"},
+            "bd": {"text": f"메시지 처리 오류: {str(e)}"},
+            "sid": sid,
+            "participant": "server"
+        }
+
+async def handle_llm_invocation(ctx, websocket, msg: dict):
     """
     LLM 호출을 처리합니다.
     - LLM 호출 로깅
@@ -16,7 +50,12 @@ async def handle_llm_invocation(ctx, sid: str, participant: str, msg: dict):
     - 결과를 Redis Stream에 저장
     """
     try:
+        # 메시지에서 필요한 정보 추출
+        sid = msg.get("sid", "unknown")
+        participant = msg.get("participant", "user")
+        
         ctx.log.info("WS", f"-- LLM invocation from {participant} in session {sid}")
+        ctx.log.debug("WS", f"-- Message: {msg}")
         
         # TODO: 실제 LLM 호출 구현
         # llm_result = await ctx.llm_manager['default'].generate(...)
@@ -35,6 +74,7 @@ async def handle_llm_invocation(ctx, sid: str, participant: str, msg: dict):
         return llm_response
     except Exception as e:
         ctx.log.error("WS", f"-- LLM invocation error: {e}")
+        sid = msg.get("sid", "unknown")
         return {
             "hd": {"event": "llm.error", "role": "llm"},
             "bd": {"text": f"LLM 오류: {str(e)}"},

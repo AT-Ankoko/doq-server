@@ -1,9 +1,9 @@
 {
-  "doq-be": {
+  "doq_be": {
     "ws": {
       "chat.message": {
         "websocket": "/v1/session/chat",
-        "handler": "src.service.messaging.ws_processor.process_chat_message",
+        "handler": "src.service.ai.chat_ws.handle_user_message",
         "description": "사용자 채팅 메시지 처리"
       },
       "llm.invoke": {
