@@ -1,43 +1,26 @@
 {
-  "Ankoko": {
-    "redis": {
-      "test-pong":   {
-        "stream_key": "ankoko:ai:stream",
-        "handler": "src.service.scripts.health_check.get_pong"
-      }
-    },
+  "doq-chat": {
     "ws": {
-      "ping":   {
-        "websocket": "/v1/analyze/stream",
-        "handler": "src.service.scripts.client_chat_service.handle_ping"
+      "chat.message": {
+        "websocket": "/v1/session/chat",
+        "handler": "src.service.messaging.ws_processor.process_chat_message",
+        "description": "사용자 채팅 메시지 처리"
       },
-      "analyze-stream": {
-        "websocket": "/v1/analyze/stream",
-        "handler": "src.service.scripts.cli_analyze_run.handle_analyze_stream"
+      "llm.invoke": {
+        "websocket": "/v1/session/chat",
+        "handler": "src.service.ai.chat_ws.handle_llm_invocation",
+        "description": "LLM 호출 요청 처리"
+      },
+      "typing": {
+        "websocket": "/v1/session/chat",
+        "handler": "src.service.messaging.ws_processor.process_typing_indicator",
+        "description": "사용자 입력 중 표시"
       }
     },
-    "rmq": {
-      "analyze-stream": {
-        "queue_name": "ankoko-from-algo",
-        "handler": "src.service.scripts.cli_analyze_service.handle_analyze_stream_response"
-      }
-    }
-  },
-  "ankoko-ai-server": {
     "redis": {
-      "test-ping": {
-        "stream_key": "ankoko:ai:stream",
-        "handler": "src.service.scripts.health_check.handle_ping_pong"
-      },
-      "analyze-stream": {
-        "stream_key": "ankoko:ai:stream",
-        "handler": "src.service.scripts.ai_analyze_service.analyze_stream_handler"
-      }
-    },
-    "rmq": {
-      "analyze-stream": {
-        "queue_name": "ankoko-to-algo",
-        "handler": "src.service.scripts.ai_analyze_service.analyze_stream_handler"
+      "chat:session:*": {
+        "stream_key": "chat:session:*",
+        "description": "세션별 채팅 메시지 저장소"
       }
     }
   }
