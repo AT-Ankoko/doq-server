@@ -109,12 +109,17 @@ class LLMManager:
 
             try:
                 response = await to_thread(_call_gemini)
+                if not response or not response.text:
+                    self.ctx.log.warning(f"[LLM] Empty response from Gemini API")
+                    return "죄송합니다. 응답을 생성할 수 없습니다."
                 return response.text
             except Exception as e:
-                self.ctx.log.error("LLM", f"-- Gemini API 호출 중 오류 발생: {e}")
-                return ""
+                self.ctx.log.error(f"[LLM] Gemini API 호출 중 오류 발생: {e}")
+                import traceback
+                self.ctx.log.error(f"[LLM] Traceback: {traceback.format_exc()}")
+                return f"죄송합니다. 오류가 발생했습니다: {str(e)}"
         
-        return ""
+        return "지원하지 않는 provider입니다."
 
     # ------------------------
     # 내부: 프롬프트 합성 + 치환 (변경 없음)

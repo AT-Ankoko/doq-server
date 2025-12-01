@@ -71,8 +71,10 @@ class WebSocketHandler:
                         "message": str(e)
                     }
 
-                await websocket.send_json(response)
-                self.log.debug("WS", f"<< Send response: {response}")
+                # 핸들러가 응답을 이미 보냈다면 (response가 None) 다시 보내지 않음
+                if response is not None:
+                    await websocket.send_json(response)
+                    self.log.debug("WS", f"<< Send response: {response}")
 
         except WebSocketDisconnect:
             self.disconnect(websocket)
