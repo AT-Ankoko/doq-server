@@ -170,9 +170,15 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
 위 대화 맥락을 고려하여, 현재 단계({state_manager.current_step.value})에 맞는 질문이나 안내를 자연스럽게 해주세요.
 """
         
-        # 8. LLM 호출
+        # 8. LLM 호출 (플레이스홀더 치환을 위해 사용자 정보 전달)
+        placeholders = {
+            "user_name": state_manager.user_info.get("user_name") or asker,
+            "user_role": state_manager.user_info.get("user_role") or hd.get("role"),
+            "contract_date": state_manager.user_info.get("contract_date") or hd.get("contract_date"),
+        }
         response_text = await manager.generate(
             full_prompt,
+            placeholders=placeholders,
             max_output_tokens=500,
             temperature=0.7
         )
