@@ -10,6 +10,15 @@ import re
 from src.service.ai.asset.prompts.doq_prompts_confirmation import _CONFIRM_PATTERNS
 
 
+class ChatEvent(Enum):
+    """WebSocket 이벤트 타입"""
+    LLM_INVOKE = "llm.invoke"       # LLM 호출 요청
+    LLM_RESPONSE = "llm.response"   # LLM 응답
+    LLM_ERROR = "llm.error"         # LLM 오류
+    CHAT_MESSAGE = "chat.message"   # 일반 채팅 메시지
+    TYPING = "typing"               # 타이핑 중
+
+
 class ChatStep(Enum):
     """대화 진행 단계"""
     INTRODUCTION = "introduction"           # 0: 소개 및 초기 인사

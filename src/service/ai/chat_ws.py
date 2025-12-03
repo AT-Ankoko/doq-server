@@ -1,7 +1,7 @@
 from fastapi import APIRouter, WebSocket
 from src.service.messaging.ws_processor import processor
 from src.utils.chat_stream_utils import store_chat_message
-from src.service.ai.chat_state_manager import SessionStateCache, ChatStateManager, ChatStep
+from src.service.ai.chat_state_manager import SessionStateCache, ChatStateManager, ChatStep, ChatEvent
 from src.service.ai.llm_manager import LLMManager
 
 from src.service.ai.asset.prompts.prompts_cfg import SYSTEM_PROMPTS
@@ -45,7 +45,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             response = {
                 "hd": {
                     "sid": sid,
-                    "event": "llm.response",
+                    "event": ChatEvent.LLM_RESPONSE.value,
                     "role": "llm",
                     "asker": asker,
                 },
@@ -90,7 +90,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             response = {
                 "hd": {
                     "sid": sid,
-                    "event": "llm.response",
+                    "event": ChatEvent.LLM_RESPONSE.value,
                     "role": "llm",
                     "asker": asker,
                     "step": next_step.value
@@ -192,7 +192,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         response = {
             "hd": {
                 "sid": sid,
-                "event": "llm.response",
+                "event": ChatEvent.LLM_RESPONSE.value,
                 "role": "llm",
                 "asker": asker,
                 "step": state_manager.current_step.value
@@ -217,6 +217,6 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
     except Exception as e:
         ctx.log.error(f"[WS]        -- LLM invocation unexpected error: {e}")
         await websocket.send_json({
-            "hd": {"sid": sid, "event": "llm.error", "role": "llm"},
+            "hd": {"sid": sid, "event": ChatEvent.LLM_ERROR.value, "role": "llm"},
             "bd": {"state": codes.ResponseStatus.SERVER_ERROR, "detail": str(e)}
         })
