@@ -156,27 +156,3 @@ class LLMManager:
 
         return _PLACEHOLDER_RE.sub(repl, text)
     
-
-    
-    def parse_reports(self, raw_text: str) -> dict:
-        """
-        Gemini 응답에서 첫 번째 JSON 블록만 뽑아 time과 함께 반환
-        """
-        # ```json ... ``` 안쪽 내용 먼저 찾기
-        match = re.search(r"```json\s*(.*?)```", raw_text, re.DOTALL | re.IGNORECASE)
-        if match:
-            raw_json = match.group(1).strip()
-        else:
-            # 없으면 그냥 { } 블록 찾아보기
-            match = re.search(r"\{.*\}", raw_text, re.DOTALL)
-            raw_json = match.group(0).strip() if match else "{}"
-
-        try:
-            reports = json.loads(raw_json)
-        except Exception:
-            reports = {}
-
-        return {
-            "time": int(time.time()),
-            "reports": reports
-        }
