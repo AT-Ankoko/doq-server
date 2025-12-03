@@ -51,7 +51,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 },
                 "bd": {
                     "text": response_text,
-                    "state": {"code": "S0000", "msg": "성공"}
+                    "state": codes.ResponseStatus.SUCCESS
                 }
             }
             
@@ -97,7 +97,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 },
                 "bd": {
                     "text": response_text,
-                    "state": {"code": "S0000", "msg": "성공"}
+                    "state": codes.ResponseStatus.SUCCESS
                 }
             }
             
@@ -199,7 +199,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             },
             "bd": {
                 "text": response_text,
-                "state": {"code": "S0000", "msg": "성공"}
+                "state": codes.ResponseStatus.SUCCESS
             }
         }
         
@@ -218,5 +218,5 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         ctx.log.error(f"[WS]        -- LLM invocation unexpected error: {e}")
         await websocket.send_json({
             "hd": {"sid": sid, "event": "llm.error", "role": "llm"},
-            "bd": {"code": "E0500", "msg": "서버 내부 오류가 발생했습니다", "detail": str(e)}
+            "bd": {"state": codes.ResponseStatus.SERVER_ERROR, "detail": str(e)}
         })
