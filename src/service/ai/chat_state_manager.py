@@ -6,6 +6,8 @@ from enum import Enum
 from typing import Optional, Dict, Any
 from datetime import datetime
 import json
+import re
+from src.service.ai.asset.prompts.doq_prompts_confirmation import _CONFIRM_PATTERNS
 
 
 class ChatStep(Enum):
@@ -70,11 +72,13 @@ class ChatStateManager:
     
     def handle_user_confirm(self, user_text: str) -> bool:
         """
-        사용자의 응답이 '확정' 또는 유사한 키워드일 경우 다음 단계로 이동
+        사용자의 응답이 확정/진행 의사로 해석될 경우 다음 단계로 이동
         """
-        if user_text.strip() in ["확정", "확인", "네", "예", "완료", "ok", "okay", "yes", "다음"]:
-            self.move_to_next_step()
-            return True
+        text = (user_text or "").strip()
+        for pattern in _CONFIRM_PATTERNS:
+            if re.search(pattern, text, flags=re.IGNORECASE):
+                self.move_to_next_step()
+                return True
         return False
     
     def move_to_next_step(self) -> ChatStep:
