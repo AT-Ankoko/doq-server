@@ -166,6 +166,8 @@ STEP_TRANSITION_PROMPT_TEMPLATE = """{system_prompt}
 이전 대화:
 {{conversation_context}}
 
+사용자({{role}}): {{user_name}} (계약일자: {{contract_date}})
+
 위 대화를 토대로, 새로운 단계({{current_step}})를 시작합니다. 
-이제 해야 할 작업을 사용자에게 설명하고 필요한 정보를 물어봐주세요.
+이제 해야 할 작업을 {{user_name}} 님에게 설명하고 필요한 정보를 물어봐주세요.
 """

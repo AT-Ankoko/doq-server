@@ -182,11 +182,17 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         classification_result = None
         if state_manager.current_step != ChatStep.INTRODUCTION:
             try:
+                classification_placeholders = {
+                    "current_step": state_manager.current_step.value,
+                    "user_response": user_query,
+                    "user_name": state_manager.user_info.get("user_name") or asker,
+                    "role": role
+                }
+                
                 classification_result = await manager.classify_response(
                     user_response=user_query,
                     current_step=state_manager.current_step.value,
-                    user_name=state_manager.user_info.get("user_name"),
-                    role=role
+                    placeholders=classification_placeholders
                 )
                 ctx.log.debug(f"[WS]        -- Response classification: {classification_result}")
                 
@@ -202,6 +208,16 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         # 7. LLM에 전달할 프롬프트 구성
         conversation_context = "\n".join(chat_history[-10:])  # 최근 10개만
         
+        # 공통 placeholders 구성
+        common_placeholders = {
+            "user_name": state_manager.user_info.get("user_name") or asker or "사용자",
+            "role": state_manager.user_info.get("role") or hd.get("role") or "client",
+            "contract_date": state_manager.user_info.get("contract_date") or hd.get("contract_date") or "",
+            "current_step": state_manager.current_step.value,
+            "step_guide": current_step_prompt,
+            "conversation_context": conversation_context,
+        }
+        
         # 분류 결과가 있으면 clarification이 필요한지 체크
         if classification_result and classification_result.get("next_action") == "ask_clarification":
             # clarification이 필요한 경우
@@ -210,39 +226,27 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         elif confirmation_message_sent:
             # 확정 메시지를 보낸 후, 다음 step의 시작 프롬프트 생성
             full_prompt = STEP_TRANSITION_PROMPT_TEMPLATE.format(system_prompt=SYSTEM_PROMPTS)
-            full_prompt = full_prompt.replace("{{current_step}}", state_manager.current_step.value)
-            full_prompt = full_prompt.replace("{{step_guide}}", current_step_prompt)
-            full_prompt = full_prompt.replace("{{conversation_context}}", conversation_context)
             
-            placeholders = {
-                "user_name": state_manager.user_info.get("user_name") or asker,
-                "role": state_manager.user_info.get("role") or hd.get("role"),
-                "contract_date": state_manager.user_info.get("contract_date") or hd.get("contract_date"),
-            }
             response_text = await manager.generate(
                 full_prompt,
-                placeholders=placeholders,
+                placeholders=common_placeholders,
                 max_output_tokens=500,
                 temperature=0.7
             )
         else:
             # 정상적인 LLM 응답 생성
             full_prompt = NORMAL_RESPONSE_PROMPT_TEMPLATE.format(system_prompt=SYSTEM_PROMPTS)
-            full_prompt = full_prompt.replace("{{current_step}}", state_manager.current_step.value)
-            full_prompt = full_prompt.replace("{{step_guide}}", current_step_prompt)
-            full_prompt = full_prompt.replace("{{conversation_context}}", conversation_context)
-            full_prompt = full_prompt.replace("{{role}}", role)
-            full_prompt = full_prompt.replace("{{user_query}}", user_query)
             
-            # 8. LLM 호출 (플레이스홀더 치환을 위해 사용자 정보 전달)
-            placeholders = {
-                "user_name": state_manager.user_info.get("user_name") or asker,
-                "role": state_manager.user_info.get("role") or hd.get("role"),
-                "contract_date": state_manager.user_info.get("contract_date") or hd.get("contract_date"),
+            # 정상 응답용 추가 placeholders
+            response_placeholders = {
+                **common_placeholders,
+                "user_query": user_query,
             }
+            
+            # 8. LLM 호출
             response_text = await manager.generate(
                 full_prompt,
-                placeholders=placeholders,
+                placeholders=response_placeholders,
                 max_output_tokens=500,
                 temperature=0.7
             )
