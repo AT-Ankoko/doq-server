@@ -55,11 +55,11 @@ class ChatStateManager:
         
         # 수집된 정보
         self.collected_data = {
-            "gab_name": None,              # 갑 이름
-            "gab_company": None,           # 갑 회사
-            "eul_name": None,              # 을 이름
-            "eul_company": None,           # 을 회사
-            "category": "디자인",          # TODO: 프로젝트 카테고리, 현재는 '디자인'으로 하드코딩
+            "client_name": None,           # 의뢰인(클라이언트) 이름
+            "client_company": None,        # 의뢰인 회사
+            "provider_name": None,         # 서비스 제공자 이름
+            "provider_company": None,      # 서비스 제공자 회사
+            "category": None,              # 프로젝트 카테고리
             "work_scope": None,
             "work_period": None,
             "start_date": None,
@@ -73,8 +73,8 @@ class ChatStateManager:
         
         # 역할별 입력 추적
         self.role_inputs = {
-            "갑": [],  # 의뢰인의 입력
-            "을": [],  # 디자이너의 입력
+            "client": [],      # 의뢰인(클라이언트)의 입력
+            "provider": [],    # 서비스 제공자의 입력
         }
         
         # 충돌 사항

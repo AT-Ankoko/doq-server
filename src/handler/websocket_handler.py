@@ -2,8 +2,6 @@
 from fastapi import WebSocket, WebSocketDisconnect
 import orjson
 
-from utils.chat_stream_utils import store_chat_message
-
 class WebSocketHandler:
     def __init__(self, ctx):
         self.ctx = ctx
@@ -51,17 +49,8 @@ class WebSocketHandler:
                     msg.setdefault("sid", sid)
                     hd["sid"] = sid
 
-                # Persist to Redis Stream for the session
-                try:
-                    if sid:
-                        # 저장용으로 role는 별도 인자로 전달
-                        store_msg = dict(msg)
-                        store_msg.pop("role", None)
-                        await store_chat_message(self.ctx, sid, role, store_msg)
-                except Exception as e:
-                    self.log.error("WS", f"-- Failed to persist chat to stream: {e}")
-
                 # Dispatch to processor / handlers
+                # (각 핸들러에서 자신의 format으로 Redis에 저장하므로 여기서는 저장하지 않음)
                 try:
                     response = await processor(self.ctx, websocket, msg)
                 except Exception as e:

@@ -115,10 +115,20 @@ class LLMManager:
                     return "죄송합니다. 응답을 생성할 수 없습니다."
                 return response.text
             except Exception as e:
-                self.ctx.log.error(f"[LLM] Gemini API 호출 중 오류 발생: {e}")
+                error_msg = str(e)
+                self.ctx.log.error(f"[LLM] Gemini API 호출 중 오류 발생: {error_msg}")
                 import traceback
                 self.ctx.log.error(f"[LLM] Traceback: {traceback.format_exc()}")
-                return f"죄송합니다. 오류가 발생했습니다: {str(e)}"
+                
+                # Rate limit 에러 처리
+                if "429" in error_msg or "Resource exhausted" in error_msg:
+                    return "죄송합니다. 현재 AI 서비스 사용량이 많아 잠시 후 다시 시도해주세요. (API 할당량 초과)"
+                elif "400" in error_msg or "Invalid" in error_msg:
+                    return "죄송합니다. 요청 형식에 오류가 있습니다. 다시 시도해주세요."
+                elif "401" in error_msg or "403" in error_msg or "Unauthorized" in error_msg:
+                    return "죄송합니다. API 인증에 실패했습니다. 관리자에게 문의해주세요."
+                else:
+                    return f"죄송합니다. AI 응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
         
         return "지원하지 않는 provider입니다."
 

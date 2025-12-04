@@ -60,7 +60,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             }
             
             await store_chat_message(
-                ctx, sid, "llm", 
+                ctx, sid, "assistant", 
                 {"hd": response["hd"], "bd": response["bd"], "sid": sid}
             )
             await websocket.send_json(response)
@@ -86,7 +86,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         
         # 3.5. 사용자 입력을 Redis 스트림에 저장
         await store_chat_message(
-            ctx, sid, user_role,
+            ctx, sid, "user",
             {"hd": {"sid": sid, "event": ChatEvent.CHAT_MESSAGE.value, "role": user_role}, 
              "bd": {"text": user_query}}
         )
@@ -116,7 +116,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             }
             
             await store_chat_message(
-                ctx, sid, "llm",
+                ctx, sid, "assistant",
                 {"hd": confirmation_response["hd"], "bd": confirmation_response["bd"], "sid": sid}
             )
             await websocket.send_json(confirmation_response)
@@ -157,8 +157,17 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 
                 text = body_data.get("bd", {}).get("text", "") if isinstance(body_data.get("bd"), dict) else ""
                 
+                # 라벨 결정: user/assistant로 표기
                 if text:
-                    chat_history.append(f"{participant_field}: {text}")
+                    if participant_field == "user":
+                        # 사용자는 role 정보(client/provider)와 함께 표기
+                        user_role_from_msg = body_data.get("hd", {}).get("role", "user") if isinstance(body_data.get("hd"), dict) else "user"
+                        label = f"user({user_role_from_msg})"
+                    elif participant_field == "assistant":
+                        label = "assistant"
+                    else:
+                        label = participant_field
+                    chat_history.append(f"{label}: {text}")
         except Exception as e:
             ctx.log.warning(f"[WS]        -- Failed to load chat history: {e}")
             import traceback
@@ -259,7 +268,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         }
         
         await store_chat_message(
-            ctx, sid, "llm",
+            ctx, sid, "assistant",
             {"hd": response["hd"], "bd": response["bd"], "sid": sid}
         )
         
