@@ -122,7 +122,9 @@ class LLMManager:
                 
                 # Rate limit 에러 처리
                 if "429" in error_msg or "Resource exhausted" in error_msg:
-                    return "죄송합니다. 현재 AI 서비스 사용량이 많아 잠시 후 다시 시도해주세요. (API 할당량 초과)"
+                    error_response = "죄송합니다. 현재 AI 서비스 사용량이 많아 잠시 후 다시 시도해주세요. (API 할당량 초과)"
+                    self.ctx.log.warning(f"[LLM] Rate limit error - returning user-friendly message")
+                    return error_response
                 elif "400" in error_msg or "Invalid" in error_msg:
                     return "죄송합니다. 요청 형식에 오류가 있습니다. 다시 시도해주세요."
                 elif "401" in error_msg or "403" in error_msg or "Unauthorized" in error_msg:

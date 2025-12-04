@@ -256,6 +256,14 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             ctx.log.warning(f"[WS]        -- Empty response from LLM for session {sid}")
             response_text = "죄송합니다. 응답을 생성할 수 없습니다. 다시 시도해주세요."
         
+        # 에러 메시지인지 확인 (API 에러 응답)
+        is_error_response = any(keyword in response_text for keyword in [
+            "API 할당량 초과", "요청 형식에 오류", "API 인증에 실패", "오류가 발생"
+        ])
+        
+        if is_error_response:
+            ctx.log.warning(f"[WS]        -- LLM returned error message for session {sid}: {response_text[:100]}")
+        
         # 9. 응답 저장 및 전송
         response = {
             "hd": {
@@ -267,7 +275,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             },
             "bd": {
                 "text": response_text,
-                "state": codes.ResponseStatus.SUCCESS
+                "state": codes.ResponseStatus.SUCCESS if not is_error_response else codes.ResponseStatus.SERVER_ERROR
             }
         }
         
@@ -276,7 +284,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             {"hd": response["hd"], "bd": response["bd"], "sid": sid}
         )
         
-        ctx.log.info(f"[WS]        -- LLM response sent (step: {state_manager.current_step.value})")
+        ctx.log.info(f"[WS]        -- LLM response sent (step: {state_manager.current_step.value}, status: {'ERROR' if is_error_response else 'OK'})")
         await websocket.send_json(response)
         
         # 10. 상태 저장
