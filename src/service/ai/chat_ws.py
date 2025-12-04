@@ -140,19 +140,8 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             ctx.log.debug(f"[WS]        -- Traceback: {traceback.format_exc()}")
             chat_history = []  # 이력 로드 실패 시 빈 배열로 계속 진행
         
-        # 6. 현재 step에 맞는 프롬프트 구성
-        step_prompts = {
-            ChatStep.INTRODUCTION: "사용자를 환영하고, 계약서 작성을 시작합니다.",
-            ChatStep.WORK_SCOPE: "작업 범위(예: 로고 디자인, 웹 디자인 등)를 구체적으로 질문하세요.",
-            ChatStep.WORK_PERIOD: "작업 기간(시작일, 종료일)을 질문하세요.",
-            ChatStep.BUDGET: "대금(금액, 지급 조건)을 질문하세요.",
-            ChatStep.REVISIONS: "수정 횟수 및 조건을 질문하세요.",
-            ChatStep.COPYRIGHT: "저작권 귀속(갑/을)을 질문하세요.",
-            ChatStep.CONFIDENTIALITY: "기밀 유지 조항 및 특약 사항을 질문하세요.",
-            ChatStep.FINALIZATION: "모든 조건을 최종 확인하고 계약서 생성을 안내하세요.",
-        }
-        
-        current_step_prompt = step_prompts.get(state_manager.current_step, "")
+        # 6. 현재 step에 맞는 프롬프트 가져오기
+        current_step_prompt = state_manager.current_step.prompt
         
         # 7. LLM에 전달할 프롬프트 구성
         conversation_context = "\n".join(chat_history[-10:])  # 최근 10개만

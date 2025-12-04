@@ -8,7 +8,7 @@ from datetime import datetime
 import json
 import re
 from src.service.ai.asset.prompts.doq_prompts_confirmation import _CONFIRM_PATTERNS
-
+from src.service.ai.asset.prompts.doq_chat_scenario import STEP_PROMPTS
 
 class ChatEvent(Enum):
     """WebSocket 이벤트 타입"""
@@ -21,7 +21,7 @@ class ChatEvent(Enum):
 
 class ChatStep(Enum):
     """대화 진행 단계"""
-    INTRODUCTION = "introduction"           # 0: 소개 및 초기 인사
+    INTRODUCTION = "introduction"          # 0: 소개 및 초기 인사
     WORK_SCOPE = "work_scope"              # 1: 작업 범위 확인
     WORK_PERIOD = "work_period"            # 2: 작업 기간 확인
     BUDGET = "budget"                      # 3: 대금 확인
@@ -31,6 +31,11 @@ class ChatStep(Enum):
     CONFLICT_RESOLUTION = "conflict_resolution"  # 7: 갑/을 조건 충돌 해결
     FINALIZATION = "finalization"          # 8: 최종 확인 및 계약서 생성
     COMPLETED = "completed"                # 9: 완료
+    
+    @property
+    def prompt(self) -> str:
+        """단계별 프롬프트 가이드 반환"""
+        return STEP_PROMPTS.get(self.value, "")
 
 
 class ChatStateManager:
