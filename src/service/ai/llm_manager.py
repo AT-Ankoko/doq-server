@@ -197,11 +197,7 @@ class LLMManager:
         # 분류용 프롬프트 구성
         classification_prompt = self._compose_prompt(
             RESPONSE_CLASSIFICATION_PROMPT,
-            placeholders={
-                "current_step": current_step,
-                "user_response": user_response,
-                **placeholders
-            }
+            placeholders=placeholders
         )
         
         # LLM 호출
