@@ -116,3 +116,55 @@ STEP_ROUTER_PROMPT = """
   "next_action": "갑의 대금 제안 대기"
 }
 """
+
+RESPONSE_CLASSIFICATION_PROMPT = """
+현재 단계: {{current_step}}
+
+사용자 응답을 분석하여 JSON 형식으로 반환하세요.
+
+{
+  "is_complete": boolean,  // 현재 단계의 질문에 대한 충분한 답변이 있는가?
+  "extracted_data": object,  // 추출된 계약 정보 (단계별로 다름)
+  "confidence": float,  // 0.0 ~ 1.0 신뢰도
+  "next_action": "proceed" | "ask_clarification" | "conflict_detected",
+  "clarification_needed": string or null,  // 추가 질문이 필요하면 그 내용
+  "extracted_fields": object,  // 수집된 데이터 필드 (예: work_scope, start_date 등)
+}
+
+단계별 추출 대상:
+- work_scope: 작업 내용, 작업물 수량, 작업 유형
+- work_period: 시작일, 종료일/예상기간
+- budget: 총 대금, 지급 방식, 지급 시점
+- revisions: 수정 횟수, 수정 범위, 추가 수정 비용
+- copyright: 저작권 귀속처, 2차 저작물 권한, 상업 이용 범위
+- confidentiality: 비밀 유지 조항, 포트폴리오 사용 가능 여부, 기타 특약
+
+사용자 응답: {{user_response}}
+"""
+
+# chat_ws.py에서 사용되는 대화 프롬프트 템플릿
+
+NORMAL_RESPONSE_PROMPT_TEMPLATE = """{system_prompt}
+
+현재 단계: {{current_step}}
+단계별 가이드: {{step_guide}}
+
+이전 대화:
+{{conversation_context}}
+
+사용자({{user_role}}): {{user_query}}
+
+위 대화 맥락을 고려하여, 현재 단계({{current_step}})에 맞는 질문이나 안내를 자연스럽게 해주세요.
+"""
+
+STEP_TRANSITION_PROMPT_TEMPLATE = """{system_prompt}
+
+현재 단계: {{current_step}}
+단계별 가이드: {{step_guide}}
+
+이전 대화:
+{{conversation_context}}
+
+위 대화를 토대로, 새로운 단계({{current_step}})를 시작합니다. 
+이제 해야 할 작업을 사용자에게 설명하고 필요한 정보를 물어봐주세요.
+"""

@@ -5,6 +5,7 @@ import os  # 추가
 import google.generativeai as genai  # Gemini 라이브러리 추가
 from asyncio import to_thread
 from typing import Any, Dict, List, Optional, Union
+import orjson
 
 from src.service.conf.gemini_api_key import GEMINI_API_KEY
 from src.service.ai.asset.prompts.doq_prompts_injection import _INJECTION_PATTERNS
@@ -156,3 +157,74 @@ class LLMManager:
 
         return _PLACEHOLDER_RE.sub(repl, text)
     
+    async def classify_response(
+        self,
+        user_response: str,
+        current_step: str,
+        **placeholders
+    ) -> Dict[str, Any]:
+        """
+        사용자 응답을 분석하여 단계별로 필요한 데이터를 추출합니다.
+        JSON 형식으로 structured output을 반환합니다.
+        
+        Args:
+            user_response: 사용자의 입력 텍스트
+            current_step: 현재 대화 단계 (예: "work_scope", "budget" 등)
+            **placeholders: 추가 context 정보
+        
+        Returns:
+            {
+                "is_complete": bool,  # 충분한 답변인가?
+                "extracted_data": dict,  # 추출된 정보
+                "confidence": float,  # 신뢰도 (0.0~1.0)
+                "next_action": str,  # "proceed" | "ask_clarification" | "conflict_detected"
+                "clarification_needed": str | null,  # 추가 질문이 필요하면 그 내용
+                "extracted_fields": dict,  # 수집된 데이터 필드
+            }
+        """
+        from src.service.ai.asset.prompts.doq_chat_scenario import RESPONSE_CLASSIFICATION_PROMPT
+        
+        # 분류용 프롬프트 구성
+        classification_prompt = self._compose_prompt(
+            RESPONSE_CLASSIFICATION_PROMPT,
+            placeholders={
+                "current_step": current_step,
+                "user_response": user_response,
+                **placeholders
+            }
+        )
+        
+        # LLM 호출
+        response_text = await self.generate(
+            classification_prompt,
+            max_output_tokens=1000,
+            temperature=0.3  # 낮은 온도로 일관된 JSON 출력
+        )
+        
+        # JSON 파싱
+        try:
+            # 응답에서 JSON 블록 추출 (```json ... ``` 형식일 수 있음)
+            json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # 직접 JSON인 경우
+                json_str = response_text
+            
+            classification_result = orjson.loads(json_str)
+            self.ctx.log.debug(f"[LLM] Response classification result: {classification_result}")
+            return classification_result
+            
+        except Exception as e:
+            self.ctx.log.error(f"[LLM] Failed to parse classification response: {e}")
+            self.ctx.log.debug(f"[LLM] Raw response: {response_text}")
+            
+            # 파싱 실패 시 기본값 반환
+            return {
+                "is_complete": False,
+                "extracted_data": {},
+                "confidence": 0.0,
+                "next_action": "ask_clarification",
+                "clarification_needed": "응답을 정확히 이해하기 위해 다시 설명해주실 수 있을까요?",
+                "extracted_fields": {}
+            }

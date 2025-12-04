@@ -5,6 +5,10 @@ from src.service.ai.chat_state_manager import SessionStateCache, ChatStateManage
 from src.service.ai.llm_manager import LLMManager
 
 from src.service.ai.asset.prompts.prompts_cfg import SYSTEM_PROMPTS
+from src.service.ai.asset.prompts.doq_chat_scenario import (
+    NORMAL_RESPONSE_PROMPT_TEMPLATE,
+    STEP_TRANSITION_PROMPT_TEMPLATE
+)
 import src.common.common_codes as codes
 import orjson
 
@@ -57,7 +61,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             
             await store_chat_message(
                 ctx, sid, "llm", 
-                orjson.dumps({"hd": response["hd"], "bd": response["bd"], "sid": sid}).decode("utf-8")
+                {"hd": response["hd"], "bd": response["bd"], "sid": sid}
             )
             await websocket.send_json(response)
             return
@@ -80,14 +84,23 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         user_role = state_manager.user_info.get("user_role", "갑")
         state_manager.add_role_input(user_role, user_query)
         
-        # 4. "확정" 키워드 체크 → 다음 step으로
+        # 3.5. 사용자 입력을 Redis 스트림에 저장
+        await store_chat_message(
+            ctx, sid, user_role,
+            {"hd": {"sid": sid, "event": ChatEvent.CHAT_MESSAGE.value, "role": user_role}, 
+             "bd": {"text": user_query}}
+        )
+        
+        # 4. "확정" 키워드 체크 → 다음 step으로 (이동만 하고 계속 진행)
+        confirmation_message_sent = False
         if state_manager.handle_user_confirm(user_query):
             next_step = state_manager.move_to_next_step()
             SessionStateCache.save(state_manager)
             ctx.log.info(f"[WS]        -- User confirmed, moved to next step: {next_step.value}")
             
+            # 확정 메시지 전송 (다음 단계 안내)
             response_text = f"다음 단계로 이동합니다. (현재: {next_step.value})"
-            response = {
+            confirmation_response = {
                 "hd": {
                     "sid": sid,
                     "event": ChatEvent.LLM_RESPONSE.value,
@@ -103,10 +116,11 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             
             await store_chat_message(
                 ctx, sid, "llm",
-                orjson.dumps({"hd": response["hd"], "bd": response["bd"], "sid": sid}).decode("utf-8")
+                {"hd": confirmation_response["hd"], "bd": confirmation_response["bd"], "sid": sid}
             )
-            await websocket.send_json(response)
-            return
+            await websocket.send_json(confirmation_response)
+            confirmation_message_sent = True
+            # 계속 진행하여 다음 step의 프롬프트도 전송
         
         # 5. 대화 이력 가져오기 (Redis에서)
         chat_history = []
@@ -117,23 +131,33 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             
             for msg_id, fields in messages:
                 # fields가 dict인지 확인
-                if isinstance(fields, dict):
-                    body_json = fields.get("body", "{}")
-                else:
+                if not isinstance(fields, dict):
                     ctx.log.debug(f"[WS]        -- Unexpected fields type: {type(fields)}")
                     continue
                 
-                # body_json이 이미 dict일 수도 있음
+                # body는 JSON 문자열로 저장되어 있음
+                body_json = fields.get("body", "{}")
+                participant_field = fields.get("participant", "user")  # Redis에 저장된 participant 필드 사용
+                
+                # body_json을 dict로 파싱
                 if isinstance(body_json, str):
-                    body_data = orjson.loads(body_json)
+                    try:
+                        body_data = orjson.loads(body_json)
+                    except Exception as parse_err:
+                        ctx.log.warning(f"[WS]        -- Failed to parse body JSON: {parse_err}, body_json={body_json}")
+                        continue
                 else:
                     body_data = body_json
                 
-                participant = body_data.get("hd", {}).get("role", "user")
-                text = body_data.get("bd", {}).get("text", "")
+                # body_data가 dict여야 함
+                if not isinstance(body_data, dict):
+                    ctx.log.warning(f"[WS]        -- body_data is not dict, got {type(body_data)}: {body_data}")
+                    continue
+                
+                text = body_data.get("bd", {}).get("text", "") if isinstance(body_data.get("bd"), dict) else ""
                 
                 if text:
-                    chat_history.append(f"{participant}: {text}")
+                    chat_history.append(f"{participant_field}: {text}")
         except Exception as e:
             ctx.log.warning(f"[WS]        -- Failed to load chat history: {e}")
             import traceback
@@ -143,34 +167,75 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         # 6. 현재 step에 맞는 프롬프트 가져오기
         current_step_prompt = state_manager.current_step.prompt
         
+        # 6.5. 응답 분류 및 데이터 추출 (옵션: 사용자 응답 분석)
+        # 현재 step이 introduction이 아닌 경우에만 응답 분석
+        classification_result = None
+        if state_manager.current_step != ChatStep.INTRODUCTION:
+            try:
+                classification_result = await manager.classify_response(
+                    user_response=user_query,
+                    current_step=state_manager.current_step.value,
+                    user_name=state_manager.user_info.get("user_name"),
+                    user_role=user_role
+                )
+                ctx.log.debug(f"[WS]        -- Response classification: {classification_result}")
+                
+                # 분류 결과에서 추출된 데이터 저장
+                if classification_result.get("extracted_fields"):
+                    for key, value in classification_result["extracted_fields"].items():
+                        state_manager.update_data(key, value)
+                
+            except Exception as e:
+                ctx.log.warning(f"[WS]        -- Response classification failed: {e}")
+                classification_result = None
+        
         # 7. LLM에 전달할 프롬프트 구성
         conversation_context = "\n".join(chat_history[-10:])  # 최근 10개만
         
-        full_prompt = f"""{SYSTEM_PROMPTS}
-
-현재 단계: {state_manager.current_step.value}
-단계별 가이드: {current_step_prompt}
-
-이전 대화:
-{conversation_context}
-
-사용자({user_role}): {user_query}
-
-위 대화 맥락을 고려하여, 현재 단계({state_manager.current_step.value})에 맞는 질문이나 안내를 자연스럽게 해주세요.
-"""
-        
-        # 8. LLM 호출 (플레이스홀더 치환을 위해 사용자 정보 전달)
-        placeholders = {
-            "user_name": state_manager.user_info.get("user_name") or asker,
-            "user_role": state_manager.user_info.get("user_role") or hd.get("role"),
-            "contract_date": state_manager.user_info.get("contract_date") or hd.get("contract_date"),
-        }
-        response_text = await manager.generate(
-            full_prompt,
-            placeholders=placeholders,
-            max_output_tokens=500,
-            temperature=0.7
-        )
+        # 분류 결과가 있으면 clarification이 필요한지 체크
+        if classification_result and classification_result.get("next_action") == "ask_clarification":
+            # clarification이 필요한 경우
+            response_text = classification_result.get("clarification_needed", "응답을 정확히 이해하기 위해 다시 설명해주실 수 있을까요?")
+            ctx.log.info(f"[WS]        -- Clarification needed for step: {state_manager.current_step.value}")
+        elif confirmation_message_sent:
+            # 확정 메시지를 보낸 후, 다음 step의 시작 프롬프트 생성
+            full_prompt = STEP_TRANSITION_PROMPT_TEMPLATE.format(system_prompt=SYSTEM_PROMPTS)
+            full_prompt = full_prompt.replace("{{current_step}}", state_manager.current_step.value)
+            full_prompt = full_prompt.replace("{{step_guide}}", current_step_prompt)
+            full_prompt = full_prompt.replace("{{conversation_context}}", conversation_context)
+            
+            placeholders = {
+                "user_name": state_manager.user_info.get("user_name") or asker,
+                "user_role": state_manager.user_info.get("user_role") or hd.get("role"),
+                "contract_date": state_manager.user_info.get("contract_date") or hd.get("contract_date"),
+            }
+            response_text = await manager.generate(
+                full_prompt,
+                placeholders=placeholders,
+                max_output_tokens=500,
+                temperature=0.7
+            )
+        else:
+            # 정상적인 LLM 응답 생성
+            full_prompt = NORMAL_RESPONSE_PROMPT_TEMPLATE.format(system_prompt=SYSTEM_PROMPTS)
+            full_prompt = full_prompt.replace("{{current_step}}", state_manager.current_step.value)
+            full_prompt = full_prompt.replace("{{step_guide}}", current_step_prompt)
+            full_prompt = full_prompt.replace("{{conversation_context}}", conversation_context)
+            full_prompt = full_prompt.replace("{{user_role}}", user_role)
+            full_prompt = full_prompt.replace("{{user_query}}", user_query)
+            
+            # 8. LLM 호출 (플레이스홀더 치환을 위해 사용자 정보 전달)
+            placeholders = {
+                "user_name": state_manager.user_info.get("user_name") or asker,
+                "user_role": state_manager.user_info.get("user_role") or hd.get("role"),
+                "contract_date": state_manager.user_info.get("contract_date") or hd.get("contract_date"),
+            }
+            response_text = await manager.generate(
+                full_prompt,
+                placeholders=placeholders,
+                max_output_tokens=500,
+                temperature=0.7
+            )
         
         # 응답이 비어있는 경우 체크
         if not response_text or response_text.strip() == "":
@@ -194,7 +259,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         
         await store_chat_message(
             ctx, sid, "llm",
-            orjson.dumps({"hd": response["hd"], "bd": response["bd"], "sid": sid}).decode("utf-8")
+            {"hd": response["hd"], "bd": response["bd"], "sid": sid}
         )
         
         ctx.log.info(f"[WS]        -- LLM response sent (step: {state_manager.current_step.value})")
