@@ -92,8 +92,9 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         )
         
         # 4. "확정" 키워드 체크 → 다음 step으로 (이동만 하고 계속 진행)
+        # introduction 단계에서는 "확정" 키워드를 무시하고 계속 진행 (갑/을 기본정보 수집 단계)
         confirmation_message_sent = False
-        if state_manager.handle_user_confirm(user_query):
+        if state_manager.current_step != ChatStep.INTRODUCTION and state_manager.handle_user_confirm(user_query):
             next_step = state_manager.move_to_next_step()
             SessionStateCache.save(state_manager)
             ctx.log.info(f"[WS]        -- User confirmed, moved to next step: {next_step.value}")
@@ -168,7 +169,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         current_step_prompt = state_manager.current_step.prompt
         
         # 6.5. 응답 분류 및 데이터 추출 (옵션: 사용자 응답 분석)
-        # 현재 step이 introduction이 아닌 경우에만 응답 분석
+        # introduction 제외 모든 단계에서 응답 분석
         classification_result = None
         if state_manager.current_step != ChatStep.INTRODUCTION:
             try:
