@@ -153,7 +153,7 @@ NORMAL_RESPONSE_PROMPT_TEMPLATE = """{system_prompt}
 이전 대화:
 {{conversation_context}}
 
-사용자({{user_role}}): {{user_query}}
+사용자({{role}}): {{user_query}}
 
 위 대화 맥락을 고려하여, 현재 단계({{current_step}})에 맞는 질문이나 안내를 자연스럽게 해주세요.
 """

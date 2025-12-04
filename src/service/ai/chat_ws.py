@@ -50,7 +50,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 "hd": {
                     "sid": sid,
                     "event": ChatEvent.LLM_RESPONSE.value,
-                    "role": "llm",
+                    "role": "assistant",
                     "asker": asker,
                 },
                 "bd": {
@@ -71,23 +71,23 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         if not state_manager:
             user_info = {
                 "user_name": hd.get("user_name") or hd.get("asker"),
-                "user_role": hd.get("user_role") or hd.get("role"),
+                "role": hd.get("role"),
                 "contract_date": hd.get("contract_date"),
             }
             state_manager = ChatStateManager(sid, user_info)
             SessionStateCache.save(state_manager)
-            ctx.log.info(f"[WS]        -- New session state created for {sid}, user: {user_info.get('user_name')} ({user_info.get('user_role')})")
+            ctx.log.info(f"[WS]        -- New session state created for {sid}, user: {user_info.get('user_name')} ({user_info.get('role')})")
         else:
             ctx.log.debug(f"[WS]        -- Loaded session state for {sid}, current_step: {state_manager.current_step.value}")
         
         # 3. 사용자 입력 기록
-        user_role = state_manager.user_info.get("user_role", "갑")
-        state_manager.add_role_input(user_role, user_query)
+        role = state_manager.user_info.get("role", "client")
+        state_manager.add_role_input(role, user_query)
         
         # 3.5. 사용자 입력을 Redis 스트림에 저장
         await store_chat_message(
             ctx, sid, "user",
-            {"hd": {"sid": sid, "event": ChatEvent.CHAT_MESSAGE.value, "role": user_role}, 
+            {"hd": {"sid": sid, "event": ChatEvent.CHAT_MESSAGE.value, "role": role}, 
              "bd": {"text": user_query}}
         )
         
@@ -105,7 +105,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 "hd": {
                     "sid": sid,
                     "event": ChatEvent.LLM_RESPONSE.value,
-                    "role": "llm",
+                    "role": "assistant",
                     "asker": asker,
                     "step": next_step.value
                 },
@@ -161,8 +161,8 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 if text:
                     if participant_field == "user":
                         # 사용자는 role 정보(client/provider)와 함께 표기
-                        user_role_from_msg = body_data.get("hd", {}).get("role", "user") if isinstance(body_data.get("hd"), dict) else "user"
-                        label = f"user({user_role_from_msg})"
+                        role_from_msg = body_data.get("hd", {}).get("role", "user") if isinstance(body_data.get("hd"), dict) else "user"
+                        label = f"user({role_from_msg})"
                     elif participant_field == "assistant":
                         label = "assistant"
                     else:
@@ -186,7 +186,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                     user_response=user_query,
                     current_step=state_manager.current_step.value,
                     user_name=state_manager.user_info.get("user_name"),
-                    user_role=user_role
+                    role=role
                 )
                 ctx.log.debug(f"[WS]        -- Response classification: {classification_result}")
                 
@@ -216,7 +216,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             
             placeholders = {
                 "user_name": state_manager.user_info.get("user_name") or asker,
-                "user_role": state_manager.user_info.get("user_role") or hd.get("role"),
+                "role": state_manager.user_info.get("role") or hd.get("role"),
                 "contract_date": state_manager.user_info.get("contract_date") or hd.get("contract_date"),
             }
             response_text = await manager.generate(
@@ -231,13 +231,13 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             full_prompt = full_prompt.replace("{{current_step}}", state_manager.current_step.value)
             full_prompt = full_prompt.replace("{{step_guide}}", current_step_prompt)
             full_prompt = full_prompt.replace("{{conversation_context}}", conversation_context)
-            full_prompt = full_prompt.replace("{{user_role}}", user_role)
+            full_prompt = full_prompt.replace("{{role}}", role)
             full_prompt = full_prompt.replace("{{user_query}}", user_query)
             
             # 8. LLM 호출 (플레이스홀더 치환을 위해 사용자 정보 전달)
             placeholders = {
                 "user_name": state_manager.user_info.get("user_name") or asker,
-                "user_role": state_manager.user_info.get("user_role") or hd.get("role"),
+                "role": state_manager.user_info.get("role") or hd.get("role"),
                 "contract_date": state_manager.user_info.get("contract_date") or hd.get("contract_date"),
             }
             response_text = await manager.generate(
@@ -257,7 +257,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             "hd": {
                 "sid": sid,
                 "event": ChatEvent.LLM_RESPONSE.value,
-                "role": "llm",
+                "role": "assistant",
                 "asker": asker,
                 "step": state_manager.current_step.value
             },
@@ -281,6 +281,6 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
     except Exception as e:
         ctx.log.error(f"[WS]        -- LLM invocation unexpected error: {e}")
         await websocket.send_json({
-            "hd": {"sid": sid, "event": ChatEvent.LLM_ERROR.value, "role": "llm"},
+            "hd": {"sid": sid, "event": ChatEvent.LLM_ERROR.value, "role": "assistant"},
             "bd": {"state": codes.ResponseStatus.SERVER_ERROR, "detail": str(e)}
         })

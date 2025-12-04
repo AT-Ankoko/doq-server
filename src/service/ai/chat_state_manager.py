@@ -49,7 +49,7 @@ class ChatStateManager:
         # 사용자 정보 (snake_case)
         self.user_info = {
             "user_name": user_info.get("user_name") if user_info else None,
-            "user_role": user_info.get("user_role") if user_info else None,
+            "role": user_info.get("role") if user_info else None,
             "contract_date": user_info.get("contract_date") if user_info else None,
         }
         
