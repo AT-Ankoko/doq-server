@@ -76,6 +76,9 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             }
             state_manager = ChatStateManager(sid, user_info)
             SessionStateCache.save(state_manager)
+            
+            # 역할 한글 표현
+            role_korean = "의뢰인(갑)" if user_info.get('role') == 'client' else "용역자(을)"
             ctx.log.info(f"[WS]        -- New session state created for {sid}, user: {user_info.get('user_name')} ({user_info.get('role')})")
         else:
             ctx.log.debug(f"[WS]        -- Loaded session state for {sid}, current_step: {state_manager.current_step.value}")
@@ -208,10 +211,14 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         # 7. LLM에 전달할 프롬프트 구성
         conversation_context = "\n".join(chat_history[-10:])  # 최근 10개만
         
+        # 역할 한글 변환
+        role_korean = "의뢰인(갑)" if state_manager.user_info.get("role") == "client" else "용역자(을)"
+        
         # 공통 placeholders 구성
         common_placeholders = {
             "user_name": state_manager.user_info.get("user_name") or asker or "사용자",
             "role": state_manager.user_info.get("role") or hd.get("role") or "client",
+            "role_korean": role_korean,
             "contract_date": state_manager.user_info.get("contract_date") or hd.get("contract_date") or "",
             "current_step": state_manager.current_step.value,
             "step_guide": current_step_prompt,
