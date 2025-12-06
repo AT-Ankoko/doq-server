@@ -9,8 +9,9 @@ async def store_chat_message(ctx, sid: str, participant: str, msg: dict, stream_
     Args:
         ctx: 애플리케이션 컨텍스트
         sid: 세션 ID
-        participant: 참여자 타입 ("user" | "assistant")
-                    - "user": 사용자 메시지 (msg.hd.role에는 "client" 또는 "provider")
+        participant: 참여자 타입 ("client" | "provider" | "assistant")
+                    - "client": 의뢰인(갑) 메시지
+                    - "provider": 용역자(을) 메시지
                     - "assistant": AI 어시스턴트 응답
         msg: 메시지 객체 (dict)
             - hd: 헤더 정보 {"role": "client" | "provider", ...}
@@ -19,13 +20,13 @@ async def store_chat_message(ctx, sid: str, participant: str, msg: dict, stream_
     
     Redis Stream 저장 형태:
     {
-        "participant": "user" | "assistant",    # 발신자 타입
-        "body": '{"hd": {...}, "bd": {...}}'   # JSON 문자열
+        "participant": "client" | "provider" | "assistant",  # 발신자 역할
+        "body": '{"hd": {...}, "bd": {...}}'                # JSON 문자열
     }
     
     예시:
-    - 클라이언트(의뢰인) 메시지: participant="user", msg.hd.role="client"
-    - 서비스 제공자 메시지: participant="user", msg.hd.role="provider"
+    - 클라이언트(의뢰인) 메시지: participant="client", msg.hd.role="client"
+    - 서비스 제공자 메시지: participant="provider", msg.hd.role="provider"
     - AI 응답: participant="assistant"
     """
     try:

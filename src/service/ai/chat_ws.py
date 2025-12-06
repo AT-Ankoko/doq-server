@@ -87,9 +87,9 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         role = state_manager.user_info.get("role", "client")
         state_manager.add_role_input(role, user_query)
         
-        # 3.5. 사용자 입력을 Redis 스트림에 저장
+        # 3.5. 사용자 입력을 Redis 스트림에 저장 (participant에 역할 포함)
         await store_chat_message(
-            ctx, sid, "user",
+            ctx, sid, role,  # "client" 또는 "provider"로 저장
             {"hd": {"sid": sid, "event": ChatEvent.CHAT_MESSAGE.value, "role": role}, 
              "bd": {"text": user_query}}
         )
@@ -160,12 +160,17 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 
                 text = body_data.get("bd", {}).get("text", "") if isinstance(body_data.get("bd"), dict) else ""
                 
-                # 라벨 결정: user/assistant로 표기
+                # 라벨 결정: client/provider/assistant로 표기
                 if text:
-                    if participant_field == "user":
-                        # 사용자는 role 정보(client/provider)와 함께 표기
+                    if participant_field in ["client", "provider"]:
+                        # 새로운 방식: participant가 직접 역할을 나타냄
+                        role_korean = "의뢰인(갑)" if participant_field == "client" else "용역자(을)"
+                        label = f"{participant_field}({role_korean})"
+                    elif participant_field == "user":
+                        # 하위 호환성: 기존 "user" 방식도 지원
                         role_from_msg = body_data.get("hd", {}).get("role", "user") if isinstance(body_data.get("hd"), dict) else "user"
-                        label = f"user({role_from_msg})"
+                        role_korean = "의뢰인(갑)" if role_from_msg == "client" else "용역자(을)" if role_from_msg == "provider" else ""
+                        label = f"user({role_from_msg}/{role_korean})" if role_korean else f"user({role_from_msg})"
                     elif participant_field == "assistant":
                         label = "assistant"
                     else:

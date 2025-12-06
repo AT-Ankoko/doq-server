@@ -114,6 +114,7 @@ class LLMManager:
                     self.ctx.log.warning(f"[LLM] Empty response from Gemini API")
                     return "죄송합니다. 응답을 생성할 수 없습니다."
                 return response.text
+            
             except Exception as e:
                 error_msg = str(e)
                 self.ctx.log.error(f"[LLM] Gemini API 호출 중 오류 발생: {error_msg}")
