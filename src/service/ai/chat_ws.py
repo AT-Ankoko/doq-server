@@ -6,11 +6,13 @@ from src.service.ai.chat_state_manager import SessionStateCache, ChatStateManage
 from src.service.ai.asset.prompts.prompts_cfg import SYSTEM_PROMPTS
 from src.service.ai.asset.prompts.doq_chat_scenario import (
     NORMAL_RESPONSE_PROMPT_TEMPLATE,
-    STEP_TRANSITION_PROMPT_TEMPLATE
+    STEP_TRANSITION_PROMPT_TEMPLATE,
+    STEP_ADVANCE_CLASSIFICATION_PROMPT,
 )
 
 import src.common.common_codes as codes
 import orjson
+import re
 
 router = APIRouter(prefix="/v1/session", tags=["Session"])
 
@@ -94,39 +96,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
              "bd": {"text": user_query}}
         )
         
-        # 4. "확정" 키워드 체크 → 다음 step으로 (이동만 하고 계속 진행)
-        # introduction 단계에서는 "확정" 키워드를 무시하고 계속 진행 (갑/을 기본정보 수집 단계)
-        confirmation_message_sent = False
-        if state_manager.current_step != ChatStep.INTRODUCTION and state_manager.handle_user_confirm(user_query):
-            next_step = state_manager.move_to_next_step()
-            await SessionStateCache.save(state_manager, ctx)
-            ctx.log.info(f"[WS]        -- User confirmed, moved to next step: {next_step.value}")
-            
-            # 확정 메시지 전송 (다음 단계 안내)
-            response_text = f"다음 단계로 이동합니다. (현재: {next_step.value})"
-            confirmation_response = {
-                "hd": {
-                    "sid": sid,
-                    "event": ChatEvent.LLM_RESPONSE.value,
-                    "role": "assistant",
-                    "asker": asker,
-                    "step": next_step.value
-                },
-                "bd": {
-                    "text": response_text,
-                    "state": codes.ResponseStatus.SUCCESS
-                }
-            }
-            
-            await store_chat_message(
-                ctx, sid, "assistant",
-                {"hd": confirmation_response["hd"], "bd": confirmation_response["bd"], "sid": sid}
-            )
-            await websocket.send_json(confirmation_response)
-            confirmation_message_sent = True
-            # 계속 진행하여 다음 step의 프롬프트도 전송
-        
-        # 5. 대화 이력 가져오기 (Redis에서)
+        # 4. 대화 이력 가져오기 (Redis에서)
         chat_history = []
         stream_key = f"chat:session:{sid}"
         try:
@@ -181,9 +151,65 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             import traceback
             ctx.log.debug(f"[WS]        -- Traceback: {traceback.format_exc()}")
             chat_history = []  # 이력 로드 실패 시 빈 배열로 계속 진행
-        
-        # 6. 현재 step에 맞는 프롬프트 가져오기
+
+        # 5. 대화 로그 기반 단계 진행 의사 분류 (Gemini 호출)
+        confirmation_message_sent = False
+        conversation_context = "\n".join(chat_history[-10:])  # 최근 10개만 사용
         current_step_prompt = state_manager.current_step.prompt
+        should_advance = False
+        try:
+            decision_text = await manager.generate(
+                STEP_ADVANCE_CLASSIFICATION_PROMPT,
+                placeholders={
+                    "conversation_context": conversation_context,
+                    "current_step": state_manager.current_step.value,
+                    "current_step_prompt": current_step_prompt,
+                    "user_query": user_query,
+                },
+                max_output_tokens=200,
+                temperature=0.2,
+            )
+
+            decision_json_match = re.search(r"```json\s*(.*?)\s*```", decision_text, re.DOTALL)
+            decision_json_str = decision_json_match.group(1) if decision_json_match else decision_text
+            decision = orjson.loads(decision_json_str)
+            should_advance = bool(decision.get("advance"))
+            ctx.log.info(f"[WS]        -- Step advance decision: {should_advance}, reason={decision.get('reason')}")
+        except Exception as e:
+            ctx.log.warning(f"[WS]        -- Step advance classification failed, fallback to keyword: {e}")
+            should_advance = state_manager.handle_user_confirm(user_query)
+
+        if should_advance and state_manager.current_step != ChatStep.INTRODUCTION:
+            next_step = state_manager.move_to_next_step()
+            await SessionStateCache.save(state_manager, ctx)
+            ctx.log.info(f"[WS]        -- User confirmed, moved to next step: {next_step.value}")
+            
+            # 확정 메시지 전송 (다음 단계 안내)
+            response_text = f"다음 단계로 이동합니다. (현재: {next_step.value})"
+            confirmation_response = {
+                "hd": {
+                    "sid": sid,
+                    "event": ChatEvent.LLM_RESPONSE.value,
+                    "role": "assistant",
+                    "asker": asker,
+                    "step": next_step.value
+                },
+                "bd": {
+                    "text": response_text,
+                    "state": codes.ResponseStatus.SUCCESS
+                }
+            }
+            
+            await store_chat_message(
+                ctx, sid, "assistant",
+                {"hd": confirmation_response["hd"], "bd": confirmation_response["bd"], "sid": sid}
+            )
+            await websocket.send_json(confirmation_response)
+            confirmation_message_sent = True
+            # 계속 진행하여 다음 step의 프롬프트도 전송
+
+        # 6. 현재 step에 맞는 프롬프트 가져오기
+        # (이미 분류 시 계산됨)
         
         # 6.5. 응답 분류 및 데이터 추출 (옵션: 사용자 응답 분석)
         # introduction 제외 모든 단계에서 응답 분석
@@ -214,7 +240,6 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 classification_result = None
         
         # 7. LLM에 전달할 프롬프트 구성
-        conversation_context = "\n".join(chat_history[-10:])  # 최근 10개만
         
         # 역할 한글 변환
         role_korean = "의뢰인(갑)" if state_manager.user_info.get("role") == "client" else "용역자(을)"

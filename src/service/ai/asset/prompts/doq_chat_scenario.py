@@ -171,3 +171,16 @@ STEP_TRANSITION_PROMPT_TEMPLATE = """{system_prompt}
 위 대화를 토대로, 새로운 단계({{current_step}})를 시작합니다. 
 이제 해야 할 작업을 {{user_name}} 님에게 설명하고 필요한 정보를 물어봐주세요.
 """
+
+# 단계 진행 의사 분류용 프롬프트
+STEP_ADVANCE_CLASSIFICATION_PROMPT = """
+아래는 갑(client)/을(provider)/assistant의 대화 로그입니다.
+현재 단계: {{current_step}}
+현재 단계 가이드: {{current_step_prompt}}
+최근 대화(최신순):
+{{conversation_context}}
+마지막 사용자 메시지: {{user_query}}
+사용자가 이 단계를 충분히 마쳤다고 판단되어 다음 단계로 진행 의사가 명확하면 advance=true, 아니면 advance=false로 판단하세요.
+반드시 아래 JSON만 출력:
+{"advance": true|false, "reason": "..."}
+"""
