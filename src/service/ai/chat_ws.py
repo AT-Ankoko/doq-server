@@ -426,9 +426,15 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         user_message = response_text or ""
         contract_draft = None
 
-        # 1차: JSON 객체 형태 {"USER_MESSAGE": "...", "CONTRACT_DRAFT": "..."}
+        # 1차: 마크다운 코드블록 제거 후 JSON 파싱 ```json {...} ```
         try:
             txt = (response_text or "").strip()
+            # 마크다운 코드블록 제거
+            json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", txt, re.DOTALL)
+            if json_match:
+                txt = json_match.group(1)
+            
+            # 이제 JSON 파싱 시도
             if txt.startswith("{"):
                 parsed = orjson.loads(txt)
                 if isinstance(parsed, dict):
