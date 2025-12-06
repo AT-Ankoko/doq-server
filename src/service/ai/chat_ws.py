@@ -172,12 +172,29 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
 
             decision_json_match = re.search(r"```json\s*(.*?)\s*```", decision_text, re.DOTALL)
             decision_json_str = decision_json_match.group(1) if decision_json_match else decision_text
-            decision = orjson.loads(decision_json_str)
-            should_advance = bool(decision.get("advance"))
-            ctx.log.info(f"[WS]        -- Step advance decision: {should_advance}, reason={decision.get('reason')}")
+
+            # 관대하게 파싱: 불리언 문자열/대소문자 섞여도 허용
+            parsed = None
+            try:
+                parsed = orjson.loads(decision_json_str)
+            except Exception:
+                # 단순 true/false 문자열만 온 경우 처리
+                text_lower = decision_json_str.strip().lower()
+                if text_lower in ("true", "false"):
+                    parsed = {"advance": text_lower == "true", "reason": "boolean_only"}
+            if parsed:
+                should_advance = bool(parsed.get("advance"))
+                ctx.log.info(f"[WS]        -- Step advance decision: {should_advance}, reason={parsed.get('reason')}")
+            else:
+                raise ValueError("Cannot parse advance decision")
         except Exception as e:
             ctx.log.warning(f"[WS]        -- Step advance classification failed, fallback to keyword: {e}")
             should_advance = state_manager.handle_user_confirm(user_query)
+
+        # 추가 폴백: 소개 단계에서 사용자가 의미 있는 입력을 하면 진행
+        if not should_advance and state_manager.current_step == ChatStep.INTRODUCTION and user_query.strip():
+            should_advance = True
+            ctx.log.info("[WS]        -- Auto-advance from introduction due to user input")
 
         if should_advance and state_manager.current_step != ChatStep.INTRODUCTION:
             next_step = state_manager.move_to_next_step()

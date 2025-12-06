@@ -180,7 +180,11 @@ STEP_ADVANCE_CLASSIFICATION_PROMPT = """
 최근 대화(최신순):
 {{conversation_context}}
 마지막 사용자 메시지: {{user_query}}
+
 사용자가 이 단계를 충분히 마쳤다고 판단되어 다음 단계로 진행 의사가 명확하면 advance=true, 아니면 advance=false로 판단하세요.
-반드시 아래 JSON만 출력:
-{"advance": true|false, "reason": "..."}
+
+출력 규칙 (엄수):
+- 아래 JSON 한 줄만 출력 (설명/문장/코드블록/마크다운 금지)
+- 키는 소문자, 불리는 true/false 소문자로
+- 형식: {"advance": true|false, "reason": "..."}
 """
