@@ -271,8 +271,8 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             should_advance = True
             ctx.log.info("[WS]        -- Auto-advance from introduction due to user input")
 
-        if should_advance and state_manager.current_step != ChatStep.INTRODUCTION:
-            # move_to_next_step 내부에서 Enum 일관성 보장됨
+        if should_advance:
+            # INTRODUCTION 단계를 포함한 모든 단계에서 진행 가능
             next_step = state_manager.move_to_next_step()
             # 혹시라도 current_step이 string이면 Enum으로 변환
             if not isinstance(state_manager.current_step, ChatStep):
@@ -378,9 +378,22 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         
         # 분류 결과가 있으면 clarification이 필요한지 체크
         if classification_result and classification_result.get("next_action") == "ask_clarification":
-            # clarification이 필요한 경우
-            response_text = classification_result.get("clarification_needed", "응답을 정확히 이해하기 위해 다시 설명해주실 수 있을까요?")
+            # clarification이 필요한 경우에도 LLM이 전체 응답 생성 (USER_MESSAGE + CONTRACT_DRAFT 포함)
             ctx.log.info(f"[WS]        -- Clarification needed for step: {state_manager.current_step.value}")
+            full_prompt = NORMAL_RESPONSE_PROMPT_TEMPLATE.format(system_prompt=SYSTEM_PROMPTS)
+            
+            # clarification 요청 내용을 프롬프트에 추가
+            response_placeholders = {
+                **common_placeholders,
+                "user_query": classification_result.get("clarification_needed", user_query),
+            }
+            
+            response_text = await manager.generate(
+                full_prompt,
+                placeholders=response_placeholders,
+                max_output_tokens=500,
+                temperature=0.7
+            )
         elif confirmation_message_sent:
             # 확정 메시지를 보낸 후, 다음 step의 시작 프롬프트 생성
             full_prompt = STEP_TRANSITION_PROMPT_TEMPLATE.format(system_prompt=SYSTEM_PROMPTS)
@@ -471,6 +484,8 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             "bd": {
                 "text": user_message,
                 "contract_draft": contract_draft,
+                "current_step": state_manager.current_step.value,
+                "progress_percentage": round((list(ChatStep).index(state_manager.current_step) / len(ChatStep)) * 100, 1),
                 "state": codes.ResponseStatus.SUCCESS if not is_error_response else codes.ResponseStatus.SERVER_ERROR
             }
         }
