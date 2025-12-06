@@ -2,13 +2,13 @@ from fastapi import APIRouter, WebSocket
 from src.service.messaging.ws_processor import processor
 from src.utils.chat_stream_utils import store_chat_message
 from src.service.ai.chat_state_manager import SessionStateCache, ChatStateManager, ChatStep, ChatEvent
-from src.service.ai.llm_manager import LLMManager
 
 from src.service.ai.asset.prompts.prompts_cfg import SYSTEM_PROMPTS
 from src.service.ai.asset.prompts.doq_chat_scenario import (
     NORMAL_RESPONSE_PROMPT_TEMPLATE,
     STEP_TRANSITION_PROMPT_TEMPLATE
 )
+
 import src.common.common_codes as codes
 import orjson
 
@@ -67,7 +67,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             return
         
         # 2. 세션 상태 로드 또는 생성
-        state_manager = SessionStateCache.get(sid)
+        state_manager = await SessionStateCache.get(sid, ctx)
         if not state_manager:
             user_info = {
                 "user_name": hd.get("user_name") or hd.get("asker"),
@@ -75,7 +75,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 "contract_date": hd.get("contract_date"),
             }
             state_manager = ChatStateManager(sid, user_info)
-            SessionStateCache.save(state_manager)
+            await SessionStateCache.save(state_manager, ctx)
             
             # 역할 한글 표현
             role_korean = "의뢰인(갑)" if user_info.get('role') == 'client' else "용역자(을)"
@@ -99,7 +99,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         confirmation_message_sent = False
         if state_manager.current_step != ChatStep.INTRODUCTION and state_manager.handle_user_confirm(user_query):
             next_step = state_manager.move_to_next_step()
-            SessionStateCache.save(state_manager)
+            await SessionStateCache.save(state_manager, ctx)
             ctx.log.info(f"[WS]        -- User confirmed, moved to next step: {next_step.value}")
             
             # 확정 메시지 전송 (다음 단계 안내)
@@ -300,7 +300,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         await websocket.send_json(response)
         
         # 10. 상태 저장
-        SessionStateCache.save(state_manager)
+        await SessionStateCache.save(state_manager, ctx)
         
     except Exception as e:
         ctx.log.error(f"[WS]        -- LLM invocation unexpected error: {e}")

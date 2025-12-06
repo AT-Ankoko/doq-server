@@ -5,8 +5,9 @@
 from enum import Enum
 from typing import Optional, Dict, Any
 from datetime import datetime
-import json
 import re
+import orjson
+import src.utils.redis_basic_utils as ru
 from src.service.ai.asset.prompts.doq_prompts_confirmation import _CONFIRM_PATTERNS
 from src.service.ai.asset.prompts.doq_chat_scenario import STEP_PROMPTS
 
@@ -179,7 +180,12 @@ class ChatStateManager:
         manager.current_step = ChatStep(data.get("current_step", "introduction"))
         manager.step_history = [ChatStep(s) for s in data.get("step_history", [])]
         manager.collected_data = data.get("collected_data", {})
-        manager.role_inputs = data.get("role_inputs", {"갑": [], "을": []})
+        role_inputs_data = data.get("role_inputs", {"client": [], "provider": []})
+        # 하위 호환: 기존 "갑"/"을" 키도 지원
+        manager.role_inputs = {
+            "client": role_inputs_data.get("client") or role_inputs_data.get("갑") or [],
+            "provider": role_inputs_data.get("provider") or role_inputs_data.get("을") or [],
+        }
         manager.conflicts = data.get("conflicts", [])
         manager.created_at = data.get("created_at", datetime.now().isoformat())
         manager.updated_at = data.get("updated_at", datetime.now().isoformat())
@@ -187,32 +193,107 @@ class ChatStateManager:
 
 
 class SessionStateCache:
-    """세션 상태 캐시 (메모리 기반, 실제로는 Redis 권장)"""
-    
-    _cache = {}
-    
+    """세션 상태 캐시 (Redis + 메모리 캐싱)"""
+
+    _cache: Dict[str, ChatStateManager] = {}
+    _REDIS_PREFIX = "chat:session_state:"
+
     @classmethod
-    def get(cls, sid: str) -> Optional[ChatStateManager]:
-        """세션 상태 조회"""
-        return cls._cache.get(sid)
-    
+    def _redis_key(cls, sid: str) -> str:
+        return f"{cls._REDIS_PREFIX}{sid}"
+
     @classmethod
-    def save(cls, manager: ChatStateManager):
-        """세션 상태 저장"""
-        cls._cache[manager.sid] = manager
-    
-    @classmethod
-    def delete(cls, sid: str):
-        """세션 상태 삭제"""
+    async def get(cls, sid: str, ctx=None) -> Optional[ChatStateManager]:
+        """세션 상태 조회 (Redis 우선, 실패 시 메모리 캐시 사용)"""
         if sid in cls._cache:
-            del cls._cache[sid]
-    
+            return cls._cache[sid]
+
+        if ctx:
+            manager = await cls._load_from_redis(ctx, sid)
+            if manager:
+                cls._cache[sid] = manager
+                return manager
+
+        return None
+
     @classmethod
-    def exists(cls, sid: str) -> bool:
+    async def save(cls, manager: ChatStateManager, ctx=None):
+        """세션 상태 저장 (Redis + 메모리)"""
+        cls._cache[manager.sid] = manager
+
+        if ctx:
+            await cls._save_to_redis(ctx, manager)
+
+    @classmethod
+    async def delete(cls, sid: str, ctx=None):
+        """세션 상태 삭제"""
+        cls._cache.pop(sid, None)
+
+        if ctx:
+            await cls._delete_from_redis(ctx, sid)
+
+    @classmethod
+    async def exists(cls, sid: str, ctx=None) -> bool:
         """세션 존재 여부"""
-        return sid in cls._cache
-    
+        if sid in cls._cache:
+            return True
+
+        if ctx:
+            try:
+                return await ru.redis_exists(ctx, cls._redis_key(sid))
+            except Exception as e:
+                ctx.log.warning(f"[WS]        -- Redis check failed for session {sid}: {e}")
+                return False
+
+        return False
+
     @classmethod
-    def list_all(cls) -> Dict[str, Dict[str, Any]]:
-        """모든 세션 상태 조회"""
+    async def list_all(cls, ctx=None) -> Dict[str, Dict[str, Any]]:
+        """모든 세션 상태 조회 (가능하면 Redis에서 불러와 메모리 동기화)"""
+        if ctx:
+            try:
+                results = await ru.redis_search_by_prefix(ctx, cls._REDIS_PREFIX)
+                for key, data in results.items():
+                    if not data:
+                        continue
+                    try:
+                        manager_dict = orjson.loads(data)
+                        manager = ChatStateManager.from_dict(manager_dict)
+                        cls._cache[manager.sid] = manager
+                    except Exception as e:
+                        ctx.log.warning(f"[WS]        -- Failed to load session state from Redis ({key}): {e}")
+                        continue
+            except Exception as e:
+                ctx.log.warning(f"[WS]        -- Redis list_all failed: {e}")
+
         return {sid: manager.to_dict() for sid, manager in cls._cache.items()}
+
+    @classmethod
+    async def _load_from_redis(cls, ctx, sid: str) -> Optional[ChatStateManager]:
+        try:
+            data = await ru.redis_get(ctx, cls._redis_key(sid))
+            if not data:
+                return None
+            manager_dict = orjson.loads(data)
+            return ChatStateManager.from_dict(manager_dict)
+        except Exception as e:
+            ctx.log.warning(f"[WS]        -- Failed to load session state from Redis for {sid}: {e}")
+            return None
+
+    @classmethod
+    async def _save_to_redis(cls, ctx, manager: ChatStateManager):
+        try:
+            await ru.redis_set(
+                ctx,
+                cls._redis_key(manager.sid),
+                orjson.dumps(manager.to_dict()).decode(),
+            )
+        except Exception as e:
+            ctx.log.warning(f"[WS]        -- Failed to save session state to Redis for {manager.sid}: {e}")
+
+    @classmethod
+    async def _delete_from_redis(cls, ctx, sid: str):
+        try:
+            await ru.redis_delete(ctx, cls._redis_key(sid))
+        except Exception as e:
+            ctx.log.warning(f"[WS]        -- Failed to delete session state from Redis for {sid}: {e}")
