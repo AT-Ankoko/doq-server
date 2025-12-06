@@ -345,7 +345,20 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         if is_error_response:
             ctx.log.warning(f"[WS]        -- LLM returned error message for session {sid}: {response_text[:100]}")
         
-        # 9. 응답 저장 및 전송
+        # 9. 응답 저장 및 전송 (USER_MESSAGE / CONTRACT_DRAFT 분리)
+        user_message = response_text or ""
+        contract_draft = None
+        try:
+            # USER_MESSAGE: ... CONTRACT_DRAFT: ... 형태 파싱
+            user_match = re.search(r"USER_MESSAGE:\s*(.*?)(?:\nCONTRACT_DRAFT:|$)", response_text, re.DOTALL)
+            contract_match = re.search(r"CONTRACT_DRAFT:\s*(.*)$", response_text, re.DOTALL)
+            if user_match:
+                user_message = user_match.group(1).strip()
+            if contract_match:
+                contract_draft = contract_match.group(1).strip()
+        except Exception as e:
+            ctx.log.warning(f"[WS]        -- Failed to split response sections: {e}")
+
         response = {
             "hd": {
                 "sid": sid,
@@ -355,7 +368,8 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 "step": state_manager.current_step.value
             },
             "bd": {
-                "text": response_text,
+                "text": user_message,
+                "contract_draft": contract_draft,
                 "state": codes.ResponseStatus.SUCCESS if not is_error_response else codes.ResponseStatus.SERVER_ERROR
             }
         }
