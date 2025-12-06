@@ -20,14 +20,17 @@ async def redis_get(ctx, key):
 
 # 단일 키-값을 저장
 # - expire_sec: 초 단위 만료 시간 (None이면 무제한)
+# - ex: expire_sec의 별칭 (Redis 라이브러리와의 호환성)
 # - return: 성공 시 True, 실패 시 False
-async def redis_set(ctx, key, value, expire_sec=None):
+async def redis_set(ctx, key, value, expire_sec=None, ex=None):
     try:
         client = ctx.redis_handler.client
-        success = await client.set(key, value, ex=expire_sec)
+        # ex 파라미터가 주어지면 expire_sec을 대체
+        ttl = ex if ex is not None else expire_sec
+        success = await client.set(key, value, ex=ttl)
         if not success:
             ctx.log.warning("REDIS", f"- SET failed: {key}")
-        ctx.log.debug("REDIS", f"!! SET {key} = {value} (expire: {expire_sec})")
+        ctx.log.debug("REDIS", f"!! SET {key} = {value} (expire: {ttl})")
         return success
     except RedisError as e:
         ctx.log.error("REDIS", f"-- SET error: {key}, {str(e)}")

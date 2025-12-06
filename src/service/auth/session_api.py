@@ -3,12 +3,17 @@
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from src.common.id_generator import generate_sid
-import random
+import src.utils.redis_basic_utils as ru
+import orjson
+from typing import Optional
 
 router = APIRouter(prefix="/v1/session", tags=["Session"])
 
 class SessionConnectRequest(BaseModel):
     userId: str
+    client_name: Optional[str] = None
+    provider_name: Optional[str] = None
+    contract_date: Optional[str] = None
 
 class SessionConnectResponse(BaseModel):
     sid: str
@@ -18,6 +23,7 @@ class SessionConnectResponse(BaseModel):
 async def connect_session(request: Request, body: SessionConnectRequest):
     """
     세션을 생성하고 세션 ID 반환
+    client_name, provider_name, contract_date 등의 정보를 함께 저장
     """
     ctx = request.app.state.ctx
     user_id = body.userId.strip()
@@ -27,14 +33,29 @@ async def connect_session(request: Request, body: SessionConnectRequest):
 
     sid = generate_sid()
 
-    # ctx.sessions은 세션 정보를 저장하는 dict라고 가정
-    if not hasattr(ctx, "sessions"):
-        ctx.sessions = {}
-
-    ctx.sessions[sid] = {
+    # 세션 정보 저장 (Redis에 저장)
+    session_info = {
         "userId": user_id,
-        "messages": [],
-        "createdAt": request.scope.get("time", None),  # 타임스탬프 저장 (선택)
+        "client_name": body.client_name or "의뢰인",
+        "provider_name": body.provider_name or "용역자",
+        "contract_date": body.contract_date,
+        "createdAt": None,
     }
+    
+    try:
+        # Redis에 세션 정보 저장 (TTL: 24시간)
+        session_key = f"session:info:{sid}"
+        await ru.redis_set(
+            ctx,
+            session_key,
+            orjson.dumps(session_info).decode(),
+            ex=86400  # 24시간
+        )
+    except Exception as e:
+        ctx.log.warning(f"[AUTH] Failed to save session info to Redis: {e}")
+        # Redis 실패 시에도 진행 (메모리에만 저장)
+        if not hasattr(ctx, "sessions"):
+            ctx.sessions = {}
+        ctx.sessions[sid] = session_info
 
     return {"sid": sid}

@@ -8,6 +8,7 @@ from src.service.ai.asset.prompts.doq_chat_scenario import (
     NORMAL_RESPONSE_PROMPT_TEMPLATE,
     STEP_TRANSITION_PROMPT_TEMPLATE,
     STEP_ADVANCE_CLASSIFICATION_PROMPT,
+    START_MESSAGE_PROMPT,
 )
 from src.service.ai.asset.prompts.doq_contract_template import CONTRACT_TEMPLATE
 
@@ -29,6 +30,64 @@ async def websocket_chat(websocket: WebSocket):
 
     # sid 전달하여 로그용 식별자 사용
     await ctx.ws_handler.connect(websocket, id=sid)
+
+    # 연결 직후 선제 인사 전송 (1회)
+    try:
+        # Redis에서 세션 정보 로드
+        session_key = f"session:info:{sid}"
+        session_info_json = None
+        client_name = "의뢰인"
+        provider_name = "용역자"
+        contract_date = None
+        
+        try:
+            redis_client = ctx.redis_handler.get_client()
+            session_info_json = await redis_client.get(session_key)
+            if session_info_json:
+                session_info = orjson.loads(session_info_json)
+                client_name = session_info.get("client_name") or "의뢰인"
+                provider_name = session_info.get("provider_name") or "용역자"
+                contract_date = session_info.get("contract_date")
+
+        except Exception as e:
+            ctx.log.warning(f"[WS]        -- Failed to load session info from Redis: {e}")
+            # 폴백: 쿼리 파라미터에서 읽기
+            client_name = websocket.query_params.get("client_name") or "의뢰인"
+            provider_name = websocket.query_params.get("provider_name") or "용역자"
+            contract_date = websocket.query_params.get("contract_date")
+
+        # START_MESSAGE_PROMPT 렌더링 (간단 치환)
+        greeting_text = START_MESSAGE_PROMPT
+        greeting_text = greeting_text.replace("{{client_name}}", client_name)
+        greeting_text = greeting_text.replace("{{service_provider_name}}", provider_name)
+
+        greeting_response = {
+            "hd": {
+                "sid": sid,
+                "event": ChatEvent.LLM_RESPONSE.value,
+                "role": "assistant",
+                "asker": None,
+                "step": ChatStep.INTRODUCTION.value,
+                "user_name": client_name,
+                "role_name": "client",
+                "contract_date": contract_date,
+            },
+            "bd": {
+                "text": greeting_text,
+                "contract_draft": None,
+                "state": codes.ResponseStatus.SUCCESS,
+            },
+        }
+        await store_chat_message(
+            ctx,
+            sid,
+            "assistant",
+            {"hd": greeting_response["hd"], "bd": greeting_response["bd"], "sid": sid},
+        )
+        await websocket.send_json(greeting_response)
+    except Exception as e:
+        ctx.log.warning(f"[WS]        -- Failed to send initial greeting: {e}")
+
     await ctx.ws_handler.receive_and_respond(websocket, processor=processor)
 
 async def handle_llm_invocation(ctx, websocket, msg: dict):
@@ -49,12 +108,20 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             ctx.log.warning(f"[WS]        -- Prompt injection detected: {user_query[:50]}")
             response_text = "아직 없는 기능입니다"
             
+            # 프롬프트 인젝션 응답에도 user_info 포함
+            user_name_val = hd.get("user_name") or hd.get("asker") or "사용자"
+            role_val = hd.get("role") or "client"
+            contract_date_val = hd.get("contract_date")
+            
             response = {
                 "hd": {
                     "sid": sid,
                     "event": ChatEvent.LLM_RESPONSE.value,
                     "role": "assistant",
                     "asker": asker,
+                    "user_name": user_name_val,
+                    "role_name": role_val,
+                    "contract_date": contract_date_val,
                 },
                 "bd": {
                     "text": response_text,
@@ -85,6 +152,13 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             ctx.log.info(f"[WS]        -- New session state created for {sid}, user: {user_info.get('user_name')} ({user_info.get('role')})")
         else:
             ctx.log.debug(f"[WS]        -- Loaded session state for {sid}, current_step: {state_manager.current_step.value}")
+            # 매 메시지마다 user_info 업데이트 (프론트에서 전송된 최신 정보로)
+            if hd.get("user_name"):
+                state_manager.user_info["user_name"] = hd.get("user_name")
+            if hd.get("role"):
+                state_manager.user_info["role"] = hd.get("role")
+            if hd.get("contract_date"):
+                state_manager.user_info["contract_date"] = hd.get("contract_date")
         
         # 3. 사용자 입력 기록
         role = state_manager.user_info.get("role", "client")
@@ -225,7 +299,10 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                     "event": ChatEvent.LLM_RESPONSE.value,
                     "role": "assistant",
                     "asker": asker,
-                    "step": next_step.value
+                    "step": next_step.value,
+                    "user_name": state_manager.user_info.get("user_name") or asker,
+                    "role_name": state_manager.user_info.get("role"),
+                    "contract_date": state_manager.user_info.get("contract_date"),
                 },
                 "bd": {
                     "text": response_text,
@@ -348,16 +425,31 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         # 9. 응답 저장 및 전송 (USER_MESSAGE / CONTRACT_DRAFT 분리)
         user_message = response_text or ""
         contract_draft = None
+
+        # 1차: JSON 객체 형태 {"USER_MESSAGE": "...", "CONTRACT_DRAFT": "..."}
         try:
-            # USER_MESSAGE: ... CONTRACT_DRAFT: ... 형태 파싱
-            user_match = re.search(r"USER_MESSAGE:\s*(.*?)(?:\nCONTRACT_DRAFT:|$)", response_text, re.DOTALL)
-            contract_match = re.search(r"CONTRACT_DRAFT:\s*(.*)$", response_text, re.DOTALL)
-            if user_match:
-                user_message = user_match.group(1).strip()
-            if contract_match:
-                contract_draft = contract_match.group(1).strip()
+            txt = (response_text or "").strip()
+            if txt.startswith("{"):
+                parsed = orjson.loads(txt)
+                if isinstance(parsed, dict):
+                    if "USER_MESSAGE" in parsed:
+                        user_message = str(parsed.get("USER_MESSAGE") or "").strip()
+                    if "CONTRACT_DRAFT" in parsed:
+                        contract_draft = str(parsed.get("CONTRACT_DRAFT") or "").strip()
         except Exception as e:
-            ctx.log.warning(f"[WS]        -- Failed to split response sections: {e}")
+            ctx.log.warning(f"[WS]        -- Failed to parse JSON response: {e}")
+
+        # 2차: 프롬프트에서 안내한 섹션 형식 USER_MESSAGE: ... CONTRACT_DRAFT: ...
+        if contract_draft is None:
+            try:
+                user_match = re.search(r"USER_MESSAGE:\s*(.*?)(?:\nCONTRACT_DRAFT:|$)", response_text, re.DOTALL)
+                contract_match = re.search(r"CONTRACT_DRAFT:\s*(.*)$", response_text, re.DOTALL)
+                if user_match:
+                    user_message = user_match.group(1).strip()
+                if contract_match:
+                    contract_draft = contract_match.group(1).strip()
+            except Exception as e:
+                ctx.log.warning(f"[WS]        -- Failed to split response sections: {e}")
 
         response = {
             "hd": {
@@ -365,7 +457,10 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 "event": ChatEvent.LLM_RESPONSE.value,
                 "role": "assistant",
                 "asker": asker,
-                "step": state_manager.current_step.value
+                "step": state_manager.current_step.value,
+                "user_name": state_manager.user_info.get("user_name") or asker,
+                "role_name": state_manager.user_info.get("role"),
+                "contract_date": state_manager.user_info.get("contract_date"),
             },
             "bd": {
                 "text": user_message,
@@ -387,7 +482,17 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         
     except Exception as e:
         ctx.log.error(f"[WS]        -- LLM invocation unexpected error: {e}")
+        error_user_name = hd.get("user_name") or hd.get("asker") or "사용자"
+        error_role = hd.get("role") or "client"
+        error_contract_date = hd.get("contract_date")
         await websocket.send_json({
-            "hd": {"sid": sid, "event": ChatEvent.LLM_ERROR.value, "role": "assistant"},
+            "hd": {
+                "sid": sid, 
+                "event": ChatEvent.LLM_ERROR.value, 
+                "role": "assistant",
+                "user_name": error_user_name,
+                "role_name": error_role,
+                "contract_date": error_contract_date,
+            },
             "bd": {"state": codes.ResponseStatus.SERVER_ERROR, "detail": str(e)}
         })
