@@ -155,7 +155,14 @@ NORMAL_RESPONSE_PROMPT_TEMPLATE = """{system_prompt}
 
 사용자({{role}}): {{user_query}}
 
-위 대화 맥락을 고려하여, 현재 단계({{current_step}})에 맞는 질문이나 안내를 자연스럽게 해주세요.
+수집된 정보(collected_data): {{collected_data_json}}
+역할별 입력(role_inputs): {{role_inputs_json}}
+계약서 템플릿: {{contract_template}}
+
+위 정보는 모두 참고용이며, 사용자에게 노출하지 마세요.
+출력 형식(순서대로):
+1) 사용자에게 보여줄 짧은 안내/질문 한 단락
+2) "용역계약서 초안" 섹션: 수집된 정보와 위 템플릿을 활용해 핵심 조항만 한국어로 간결히 작성 (미기재 항목은 "미기재" 표기). 서론/메타설명 없이 계약 조항만 보여주세요.
 """
 
 STEP_TRANSITION_PROMPT_TEMPLATE = """{system_prompt}
@@ -168,8 +175,14 @@ STEP_TRANSITION_PROMPT_TEMPLATE = """{system_prompt}
 
 사용자({{role}}): {{user_name}} (계약일자: {{contract_date}})
 
-위 대화를 토대로, 새로운 단계({{current_step}})를 시작합니다. 
-이제 해야 할 작업을 {{user_name}} 님에게 설명하고 필요한 정보를 물어봐주세요.
+수집된 정보(collected_data): {{collected_data_json}}
+역할별 입력(role_inputs): {{role_inputs_json}}
+계약서 템플릿: {{contract_template}}
+
+위 정보는 모두 참고용이며, 사용자에게 노출하지 마세요.
+출력 형식(순서대로):
+1) 사용자에게 보여줄 짧은 안내/질문 한 단락 (새 단계 시작 알림 포함 가능)
+2) "용역계약서 초안" 섹션: 수집된 정보와 위 템플릿을 활용해 핵심 조항만 한국어로 간결히 작성 (미기재 항목은 "미기재" 표기). 서론/메타설명 없이 계약 조항만 보여주세요.
 """
 
 # 단계 진행 의사 분류용 프롬프트

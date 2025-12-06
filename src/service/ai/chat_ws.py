@@ -9,6 +9,7 @@ from src.service.ai.asset.prompts.doq_chat_scenario import (
     STEP_TRANSITION_PROMPT_TEMPLATE,
     STEP_ADVANCE_CLASSIFICATION_PROMPT,
 )
+from src.service.ai.asset.prompts.doq_contract_template import CONTRACT_TEMPLATE
 
 import src.common.common_codes as codes
 import orjson
@@ -197,12 +198,27 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             ctx.log.info("[WS]        -- Auto-advance from introduction due to user input")
 
         if should_advance and state_manager.current_step != ChatStep.INTRODUCTION:
+            # move_to_next_step 내부에서 Enum 일관성 보장됨
             next_step = state_manager.move_to_next_step()
+            # 혹시라도 current_step이 string이면 Enum으로 변환
+            if not isinstance(state_manager.current_step, ChatStep):
+                try:
+                    state_manager.current_step = ChatStep(state_manager.current_step)
+                except Exception:
+                    state_manager.current_step = ChatStep.INTRODUCTION
+            # step_history도 Enum만 유지
+            state_manager.step_history = [s if isinstance(s, ChatStep) else ChatStep(s) for s in state_manager.step_history]
             await SessionStateCache.save(state_manager, ctx)
             ctx.log.info(f"[WS]        -- User confirmed, moved to next step: {next_step.value}")
-            
+
+            # 단계 전환 후 프롬프트 갱신
+            current_step_prompt = state_manager.current_step.prompt
+
+            # 진행률도 Enum 기준으로 계산
+            progress_percentage = round((list(ChatStep).index(state_manager.current_step) / len(ChatStep)) * 100, 1)
+
             # 확정 메시지 전송 (다음 단계 안내)
-            response_text = f"다음 단계로 이동합니다. (현재: {next_step.value})"
+            response_text = f"다음 단계로 이동합니다. (현재: {next_step.value}, 진행률: {progress_percentage}%)"
             confirmation_response = {
                 "hd": {
                     "sid": sid,
@@ -216,7 +232,6 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                     "state": codes.ResponseStatus.SUCCESS
                 }
             }
-            
             await store_chat_message(
                 ctx, sid, "assistant",
                 {"hd": confirmation_response["hd"], "bd": confirmation_response["bd"], "sid": sid}
@@ -262,6 +277,15 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         role_korean = "의뢰인(갑)" if state_manager.user_info.get("role") == "client" else "용역자(을)"
         
         # 공통 placeholders 구성
+        collected_data_json = ""
+        role_inputs_json = ""
+        try:
+            collected_data_json = orjson.dumps(state_manager.collected_data).decode()
+            role_inputs_json = orjson.dumps(state_manager.role_inputs).decode()
+        except Exception:
+            collected_data_json = str(state_manager.collected_data)
+            role_inputs_json = str(state_manager.role_inputs)
+
         common_placeholders = {
             "user_name": state_manager.user_info.get("user_name") or asker or "사용자",
             "role": state_manager.user_info.get("role") or hd.get("role") or "client",
@@ -270,6 +294,9 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             "current_step": state_manager.current_step.value,
             "step_guide": current_step_prompt,
             "conversation_context": conversation_context,
+            "collected_data_json": collected_data_json,
+            "role_inputs_json": role_inputs_json,
+            "contract_template": CONTRACT_TEMPLATE,
         }
         
         # 분류 결과가 있으면 clarification이 필요한지 체크

@@ -97,19 +97,32 @@ class ChatStateManager:
         return False
     
     def move_to_next_step(self) -> ChatStep:
-        """다음 단계로 이동"""
+        """다음 단계로 이동 (Enum 일관성 보장)"""
         steps = list(ChatStep)
+        # current_step이 string일 경우 Enum으로 변환
+        if not isinstance(self.current_step, ChatStep):
+            try:
+                self.current_step = ChatStep(self.current_step)
+            except Exception:
+                self.current_step = ChatStep.INTRODUCTION
         current_idx = steps.index(self.current_step)
-        
         if current_idx < len(steps) - 1:
             self.current_step = steps[current_idx + 1]
-            self.step_history.append(self.current_step)
+            # step_history에 Enum만 추가
+            if not self.step_history or self.step_history[-1] != self.current_step:
+                self.step_history.append(self.current_step)
             self.updated_at = datetime.now().isoformat()
             return self.current_step
         return self.current_step
     
-    def jump_to_step(self, step: ChatStep) -> ChatStep:
-        """특정 단계로 이동"""
+    def jump_to_step(self, step) -> ChatStep:
+        """특정 단계로 이동 (Enum 일관성 보장)"""
+        # step이 string이면 Enum으로 변환
+        if not isinstance(step, ChatStep):
+            try:
+                step = ChatStep(step)
+            except Exception:
+                step = ChatStep.INTRODUCTION
         self.current_step = step
         if step not in self.step_history:
             self.step_history.append(step)
@@ -174,11 +187,29 @@ class ChatStateManager:
     
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> 'ChatStateManager':
-        """딕셔너리에서 복원"""
+        """딕셔너리에서 복원 (Enum 일관성 보장)"""
         user_info = data.get("user_info", {})
         manager = ChatStateManager(data.get("sid", "unknown"), user_info=user_info)
-        manager.current_step = ChatStep(data.get("current_step", "introduction"))
-        manager.step_history = [ChatStep(s) for s in data.get("step_history", [])]
+        # current_step이 string이면 Enum으로 변환
+        cur_step = data.get("current_step", "introduction")
+        if not isinstance(cur_step, ChatStep):
+            try:
+                cur_step = ChatStep(cur_step)
+            except Exception:
+                cur_step = ChatStep.INTRODUCTION
+        manager.current_step = cur_step
+        # step_history도 Enum으로 변환
+        step_hist = data.get("step_history", [])
+        manager.step_history = []
+        for s in step_hist:
+            if isinstance(s, ChatStep):
+                manager.step_history.append(s)
+            else:
+                try:
+                    manager.step_history.append(ChatStep(s))
+                except Exception:
+                    continue
+        # collected_data는 그대로
         manager.collected_data = data.get("collected_data", {})
         role_inputs_data = data.get("role_inputs", {"client": [], "provider": []})
         # 하위 호환: 기존 "갑"/"을" 키도 지원
