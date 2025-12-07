@@ -239,17 +239,31 @@ STEP_TRANSITION_PROMPT_TEMPLATE = """{system_prompt}
 
 # 단계 진행 의사 분류용 프롬프트
 STEP_ADVANCE_CLASSIFICATION_PROMPT = """
-아래는 갑(client)/을(provider)/assistant의 대화 로그입니다.
-현재 단계: {{current_step}}
-현재 단계 가이드: {{current_step_prompt}}
-최근 대화(최신순):
-{{conversation_context}}
+아래는 client / provider / assistant 간의 대화 로그입니다.
+
+현재 단계: {{current_step}}  
+단계 가이드: {{current_step_prompt}}  
+최근 대화(최신순):  
+{{conversation_context}}  
 마지막 사용자 메시지: {{user_query}}
 
-사용자가 이 단계를 충분히 마쳤다고 판단되어 다음 단계로 진행 의사가 명확하면 advance=true, 아니면 advance=false로 판단하세요.
+사용자의 응답을 분석하여, 현재 단계의 정보 수집이 완료되어 다음 단계로 진행할 수 있는지 판단하세요.
+
+판단 기준:
+
+1. 다음 조건 중 하나라도 만족하면 "advance": true
+   - 사용자가 이 단계의 질문에 대해 구체적이고 명확한 정보를 제공한 경우
+   - 사용자가 상대방의 제안 또는 assistant의 중재안에 대해 수락, 동의, 긍정의 표현을 한 경우
+     예: "좋습니다", "네", "동의합니다", "괜찮아요", "ㅇㅇ", "ㄱㅊ", "ok", "오케이", "진행하시죠", "문제 없습니다" 등
+
+2. 다음 조건 중 하나라도 해당되면 "advance": false
+   - 사용자의 응답이 질문의 요지를 피해가거나 불완전한 경우 (예: "아직 잘 모르겠어요", "좀 더 생각해볼게요")
+   - 사용자 또는 상대방이 조건 변경을 요청한 경우
+   - 합의하지 않고 반대 또는 거절 의사를 표현한 경우 (예: "아니요", "좀 어렵습니다", "그건 안 됩니다")
+   - 사용자가 추가 질문을 한 경우
 
 출력 규칙 (엄수):
-- 아래 JSON 한 줄만 출력 (설명/문장/코드블록/마크다운 금지)
-- 키는 소문자, 불리는 true/false 소문자로
-- 형식: {"advance": true|false, "reason": "..."}
+- 아래 JSON 한 줄만 출력
+- 설명, 코드블럭, 마크다운 등은 절대 포함하지 마세요
+- 형식: {"advance": true|false, "reason": "판단 근거 간결하게 서술"}
 """

@@ -15,4 +15,9 @@ _CONFIRM_PATTERNS = [
     r"\bok(?:ay)?\b",          # ok, okay
     r"\byes\b",                # yes
     r"\b다음(?:으로)?\b",      # 다음, 다음으로
+    r"좋습니다",
+    r"동의합니다",
+    r"ㄱㅊ",
+    r"ㅇㅇ",
+    r"진행",
 ]
