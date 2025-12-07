@@ -517,7 +517,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         if classification_result and classification_result.get("next_action") == "ask_clarification":
             # clarification이 필요한 경우에도 LLM이 전체 응답 생성 (USER_MESSAGE + CONTRACT_DRAFT 포함)
             ctx.log.info(f"[WS]        -- Clarification needed for step: {state_manager.current_step.value}")
-            full_prompt = NORMAL_RESPONSE_PROMPT_TEMPLATE.format(system_prompt=SYSTEM_PROMPTS)
+            full_prompt = NORMAL_RESPONSE_PROMPT_TEMPLATE.replace("{system_prompt}", SYSTEM_PROMPTS)
             
             # clarification 요청 내용을 프롬프트에 추가
             response_placeholders = {
@@ -533,7 +533,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             )
         elif confirmation_message_sent:
             # 확정 메시지를 보낸 후, 다음 step의 시작 프롬프트 생성
-            full_prompt = STEP_TRANSITION_PROMPT_TEMPLATE.format(system_prompt=SYSTEM_PROMPTS)
+            full_prompt = STEP_TRANSITION_PROMPT_TEMPLATE.replace("{system_prompt}", SYSTEM_PROMPTS)
             
             response_text = await manager.generate(
                 full_prompt,
@@ -543,7 +543,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             )
         else:
             # 정상적인 LLM 응답 생성
-            full_prompt = NORMAL_RESPONSE_PROMPT_TEMPLATE.format(system_prompt=SYSTEM_PROMPTS)
+            full_prompt = NORMAL_RESPONSE_PROMPT_TEMPLATE.replace("{system_prompt}", SYSTEM_PROMPTS)
             
             # 정상 응답용 추가 placeholders
             response_placeholders = {
