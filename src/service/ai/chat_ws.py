@@ -454,7 +454,11 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         if current_step_key:
             val = state_manager.collected_data.get(current_step_key)
             if val:
-                step_specific_instruction = f"[중요] 현재 단계의 핵심 정보인 '{current_step_key}'가 이미 '{val}'(으)로 수집되었습니다. 절대 '어떤 작업인가요?'와 같은 중복 질문을 하지 마세요. 대신 '{val}'에 대한 구체적인 세부 사항(수량, 일정, 스타일 등)을 질문하거나 확인하세요."
+                step_specific_instruction = (
+                    f"[중요] 현재 단계의 핵심 정보인 '{current_step_key}'가 이미 '{val}'(으)로 수집되었습니다. "
+                    f"절대 '어떤 작업인가요?'와 같은 중복 질문을 하지 마세요. "
+                    f"대신 '{val}'에 대해 상대방(용역자/의뢰인)의 동의를 구하거나, 구체적인 세부 사항(수량, 일정, 스타일 등)을 질문하여 대화를 심화시키세요."
+                )
         
         common_placeholders = {
             "user_name": state_manager.user_info.get("user_name") or asker or "사용자",
