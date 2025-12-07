@@ -291,7 +291,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         if should_advance:
             # INTRODUCTION 단계를 포함한 모든 단계에서 진행 가능
             
-            # ⭐ 현재 단계 데이터 저장 (단계 전환 전에!)
+            # 현재 단계 데이터 저장 (단계 전환 전에!)
             # introduction에서 work_scope로 갈 때는 current_step이 아직 introduction
             # 따라서 현재 단계의 사용자 입력을 "이전 단계 → 다음 단계의 필드"로 매핑해서 저장
             current_step_to_field_mapping = {
@@ -439,6 +439,22 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             if value is not None and value != "":
                 collected_fields_summary.append(f"- {key}: {value}")
         collected_fields_str = "\n".join(collected_fields_summary) if collected_fields_summary else "아직 수집된 정보가 없습니다."
+
+        # 현재 단계의 주요 데이터가 이미 수집되었는지 확인하여 지침 생성
+        step_key_mapping = {
+            ChatStep.WORK_SCOPE: "work_scope",
+            ChatStep.WORK_PERIOD: "work_period",
+            ChatStep.BUDGET: "budget",
+            ChatStep.REVISIONS: "revision_count",
+            ChatStep.COPYRIGHT: "copyright_owner",
+            ChatStep.CONFIDENTIALITY: "confidentiality_terms",
+        }
+        current_step_key = step_key_mapping.get(state_manager.current_step)
+        step_specific_instruction = ""
+        if current_step_key:
+            val = state_manager.collected_data.get(current_step_key)
+            if val:
+                step_specific_instruction = f"[중요] 현재 단계의 핵심 정보인 '{current_step_key}'가 이미 '{val}'(으)로 수집되었습니다. 절대 '어떤 작업인가요?'와 같은 중복 질문을 하지 마세요. 대신 '{val}'에 대한 구체적인 세부 사항(수량, 일정, 스타일 등)을 질문하거나 확인하세요."
         
         common_placeholders = {
             "user_name": state_manager.user_info.get("user_name") or asker or "사용자",
@@ -452,6 +468,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             "conversation_context": conversation_context,
             "collected_data_json": collected_data_json,
             "collected_fields_summary": collected_fields_str,  # 새로 추가: 가독성 좋은 요약
+            "step_specific_instruction": step_specific_instruction, # 동적 지침 추가
             "role_inputs_json": role_inputs_json,
             "contract_template": CONTRACT_TEMPLATE,
             "previous_contract_draft": previous_contract_draft or "없음",
