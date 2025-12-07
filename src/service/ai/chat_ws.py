@@ -528,7 +528,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             response_text = await manager.generate(
                 full_prompt,
                 placeholders=response_placeholders,
-                max_output_tokens=500,
+                max_output_tokens=4000,
                 temperature=0.7
             )
         elif confirmation_message_sent:
@@ -538,7 +538,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             response_text = await manager.generate(
                 full_prompt,
                 placeholders=common_placeholders,
-                max_output_tokens=500,
+                max_output_tokens=4000,
                 temperature=0.7
             )
         else:
@@ -555,7 +555,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             response_text = await manager.generate(
                 full_prompt,
                 placeholders=response_placeholders,
-                max_output_tokens=500,
+                max_output_tokens=4000,
                 temperature=0.7
             )
         

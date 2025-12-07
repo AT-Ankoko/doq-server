@@ -157,6 +157,10 @@ async def main():
         await trigger_llm(ws, "client")
         await receive_response(ws)
 
+        await send_message(ws, "client", "특별한 내용은 없습니다. 표준 조항으로 해주세요.")
+        await trigger_llm(ws, "client")
+        await receive_response(ws)
+
 if __name__ == "__main__":
     try:
         asyncio.run(main())

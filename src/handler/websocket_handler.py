@@ -70,10 +70,14 @@ class WebSocketHandler:
 
         except Exception as e:
             self.log.error("WS", f"- Unexpected error: {str(e)}")
-            await websocket.send_json({
-                "status": "error",
-                "errMsg": str(e)
-            })
+            try:
+                await websocket.send_json({
+                    "status": "error",
+                    "errMsg": str(e)
+                })
+            except Exception:
+                # If sending error message fails (e.g. socket closed), just ignore
+                pass
             self.disconnect(websocket)
 
     async def disconnect_all(self):
