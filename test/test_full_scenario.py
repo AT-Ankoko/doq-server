@@ -14,7 +14,7 @@ SESSION_ID = f"full_scenario_test_{random_suffix}"
 
 # Participants
 CLIENT_NAME = "고예경"
-PROVIDER_NAME = "이영지"
+PROVIDER_NAME = "김영지"
 
 async def send_message(websocket, role: str, text: str):
     msg = {
@@ -54,6 +54,12 @@ async def receive_response(websocket):
             if event == "llm.response":
                 text = data.get("bd", {}).get("text", "")
                 print(f"\n[DoQ]: \n{text}\n")
+                
+                # If text contains "다음 단계로 이동합니다", wait for another message
+                if "다음 단계로 이동합니다" in text:
+                    print("(System): Transition detected, waiting for follow-up question...")
+                    continue
+                
                 return text
             elif event == "chat.message":
                 # Echo of user message, ignore
