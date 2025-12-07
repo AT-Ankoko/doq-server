@@ -25,6 +25,7 @@ async def websocket_chat(websocket: WebSocket):
 
     # 쿼리 파라미터에서 sid 추출
     sid = websocket.query_params.get("sid")
+    ctx.log.info(f"[WS] Connection request: sid={sid}, query_params={websocket.query_params}")
     if not sid:
         await websocket.close(code=4001)
         return
@@ -49,6 +50,19 @@ async def websocket_chat(websocket: WebSocket):
                 client_name = session_info.get("client_name") or "의뢰인"
                 provider_name = session_info.get("provider_name") or "용역자"
                 contract_date = session_info.get("contract_date")
+            else:
+                # Redis에 없으면 쿼리 파라미터에서 읽어서 Redis에 저장 (최초 1회)
+                client_name = websocket.query_params.get("client_name") or "의뢰인"
+                provider_name = websocket.query_params.get("provider_name") or "용역자"
+                contract_date = websocket.query_params.get("contract_date")
+                
+                # Redis에 저장
+                new_info = {
+                    "client_name": client_name,
+                    "provider_name": provider_name,
+                    "contract_date": contract_date
+                }
+                await redis_client.set(session_key, orjson.dumps(new_info))
 
         except Exception as e:
             ctx.log.warning(f"[WS]        -- Failed to load session info from Redis: {e}")
@@ -137,6 +151,22 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             await websocket.send_json(response)
             return
         
+        # Redis에서 session_info 로드 (참여자 이름 확인)
+        client_name_fixed = "의뢰인"
+        provider_name_fixed = "용역자"
+        try:
+            redis_client = ctx.redis_handler.get_client()
+            session_key = f"session:info:{sid}"
+            session_info_json = await redis_client.get(session_key)
+            if session_info_json:
+                session_info = orjson.loads(session_info_json)
+                client_name_fixed = session_info.get("client_name") or "의뢰인"
+                provider_name_fixed = session_info.get("provider_name") or "용역자"
+        except Exception as e:
+            ctx.log.warning(f"[WS]        -- Failed to load session info in handler: {e}")
+            # 폴백: 쿼리 파라미터에서 읽기 (하지만 handle_llm_invocation에는 websocket 객체가 직접 전달되지 않음)
+            # 대신 state_manager의 user_info를 활용하거나 기본값 사용
+
         # 2. 세션 상태 로드 또는 생성
         state_manager = await SessionStateCache.get(sid, ctx)
         if not state_manager:
@@ -147,6 +177,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             }
             state_manager = ChatStateManager(sid, user_info)
             await SessionStateCache.save(state_manager, ctx)
+
         
             # 역할 한글 표현
             role_korean = "의뢰인(갑)" if user_info.get('role') == 'client' else "용역자(을)"
@@ -460,7 +491,11 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                     f"대신 '{val}'에 대해 상대방(용역자/의뢰인)의 동의를 구하거나, 구체적인 세부 사항(수량, 일정, 스타일 등)을 질문하여 대화를 심화시키세요."
                 )
         
+        # Redis에서 session_info 로드 (참여자 이름 확인) - 위에서 이미 로드함
+        
         common_placeholders = {
+            "client_name": client_name_fixed,
+            "provider_name": provider_name_fixed,
             "user_name": state_manager.user_info.get("user_name") or asker or "사용자",
             "role": state_manager.user_info.get("role") or hd.get("role") or "client",
             "role_korean": role_korean,
