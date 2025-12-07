@@ -173,6 +173,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         
         # 4. 대화 이력 가져오기 (Redis에서)
         chat_history = []
+        previous_contract_draft = None  # 이전 contract_draft 저장
         stream_key = f"chat:session:{sid}"
         try:
             redis_client = ctx.redis_handler.get_client()
@@ -205,6 +206,12 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 
                 text = body_data.get("bd", {}).get("text", "") if isinstance(body_data.get("bd"), dict) else ""
                 
+                # 이전 contract_draft 추출 (가장 최근 것)
+                if previous_contract_draft is None:
+                    contract_draft_from_msg = body_data.get("bd", {}).get("contract_draft") if isinstance(body_data.get("bd"), dict) else None
+                    if contract_draft_from_msg:
+                        previous_contract_draft = contract_draft_from_msg
+                
                 # 라벨 결정: client/provider/assistant로 표기
                 if text:
                     if participant_field in ["client", "provider"]:
@@ -226,6 +233,11 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             import traceback
             ctx.log.debug(f"[WS]        -- Traceback: {traceback.format_exc()}")
             chat_history = []  # 이력 로드 실패 시 빈 배열로 계속 진행
+
+        # 대화 이력 로그 출력 (디버깅용)
+        ctx.log.info(f"[WS]        -- Chat history loaded: {len(chat_history)} messages")
+        if chat_history:
+            ctx.log.debug(f"[WS]        -- History preview: {chat_history[-3:]}")  # 최근 3개
 
         # 5. 대화 로그 기반 단계 진행 의사 분류 (Gemini 호출)
         confirmation_message_sent = False
@@ -321,9 +333,9 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         # (이미 분류 시 계산됨)
         
         # 6.5. 응답 분류 및 데이터 추출 (옵션: 사용자 응답 분석)
-        # introduction 제외 모든 단계에서 응답 분석
+        # introduction 제외 모든 단계에서 응답 분석 (단, 단계 진행 후 아님)
         classification_result = None
-        if state_manager.current_step != ChatStep.INTRODUCTION:
+        if not confirmation_message_sent and state_manager.current_step != ChatStep.INTRODUCTION:
             try:
                 classification_placeholders = {
                     "current_step": state_manager.current_step.value,
@@ -374,6 +386,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             "collected_data_json": collected_data_json,
             "role_inputs_json": role_inputs_json,
             "contract_template": CONTRACT_TEMPLATE,
+            "previous_contract_draft": previous_contract_draft or "없음",
         }
         
         # 분류 결과가 있으면 clarification이 필요한지 체크
