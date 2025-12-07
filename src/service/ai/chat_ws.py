@@ -9,6 +9,7 @@ from src.service.ai.asset.prompts.doq_chat_scenario import (
     STEP_TRANSITION_PROMPT_TEMPLATE,
     STEP_ADVANCE_CLASSIFICATION_PROMPT,
     START_MESSAGE_PROMPT,
+    STEP_PROMPTS,
 )
 from src.service.ai.asset.prompts.doq_contract_template import CONTRACT_TEMPLATE
 
@@ -179,7 +180,8 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             redis_client = ctx.redis_handler.get_client()
             messages = await redis_client.xrange(stream_key, count=20)  # 최근 20개 메시지
             
-            for msg_id, fields in messages:
+            # 메시지를 역순으로 처리하여 가장 최신의 contract_draft 찾기
+            for msg_id, fields in reversed(messages):
                 # fields가 dict인지 확인
                 if not isinstance(fields, dict):
                     ctx.log.debug(f"[WS]        -- Unexpected fields type: {type(fields)}")
@@ -206,7 +208,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 
                 text = body_data.get("bd", {}).get("text", "") if isinstance(body_data.get("bd"), dict) else ""
                 
-                # 이전 contract_draft 추출 (가장 최근 것)
+                # 이전 contract_draft 추출 (가장 최근 것을 한 번만)
                 if previous_contract_draft is None:
                     contract_draft_from_msg = body_data.get("bd", {}).get("contract_draft") if isinstance(body_data.get("bd"), dict) else None
                     if contract_draft_from_msg:
@@ -241,6 +243,8 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
 
         # 5. 대화 로그 기반 단계 진행 의사 분류 (Gemini 호출)
         confirmation_message_sent = False
+        # chat_history를 다시 정렬 (역순으로 추출했으므로)
+        chat_history.reverse()
         conversation_context = "\n".join(chat_history[-10:])  # 최근 10개만 사용
         current_step_prompt = state_manager.current_step.prompt
         should_advance = False
@@ -286,6 +290,32 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
 
         if should_advance:
             # INTRODUCTION 단계를 포함한 모든 단계에서 진행 가능
+            
+            # ⭐ 현재 단계 데이터 저장 (단계 전환 전에!)
+            # introduction에서 work_scope로 갈 때는 current_step이 아직 introduction
+            # 따라서 현재 단계의 사용자 입력을 "이전 단계 → 다음 단계의 필드"로 매핑해서 저장
+            current_step_to_field_mapping = {
+                ChatStep.INTRODUCTION: None,  # introduction의 입력은 별도 처리 필요 없음
+                ChatStep.WORK_SCOPE: "work_scope",
+                ChatStep.WORK_PERIOD: "work_period",
+                ChatStep.BUDGET: "budget",
+                ChatStep.REVISIONS: "revision_count",
+                ChatStep.COPYRIGHT: "copyright_owner",
+                ChatStep.CONFIDENTIALITY: "confidentiality_terms",
+            }
+            
+            # introduction → work_scope 특수 케이스 처리
+            if state_manager.current_step == ChatStep.INTRODUCTION:
+                if user_query.strip() and state_manager.collected_data.get("work_scope") is None:
+                    state_manager.update_data("work_scope", user_query.strip())
+                    ctx.log.info(f"[WS]        -- Auto-saved user input from introduction to work_scope: {user_query[:50]}...")
+            else:
+                # 다른 단계에서의 입력 저장 (현재 단계 필드에)
+                current_field = current_step_to_field_mapping.get(state_manager.current_step)
+                if current_field and user_query.strip() and state_manager.collected_data.get(current_field) is None:
+                    state_manager.update_data(current_field, user_query.strip())
+                    ctx.log.info(f"[WS]        -- Auto-saved user input from {state_manager.current_step.value} to {current_field}: {user_query[:50]}...")
+            
             next_step = state_manager.move_to_next_step()
 
             # 혹시라도 current_step이 string이면 Enum으로 변환
@@ -359,9 +389,28 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                     for key, value in classification_result["extracted_fields"].items():
                         state_manager.update_data(key, value)
                 
+                ctx.log.info(f"[WS]        -- Extracted fields saved: {classification_result.get('extracted_fields', {})}")
             except Exception as e:
                 ctx.log.warning(f"[WS]        -- Response classification failed: {e}")
                 classification_result = None
+        
+        # 6.6 분류 실패 시 현재 단계에 맞게 간단히 데이터 저장
+        # (예: work_scope 단계면 사용자 입력 전체를 work_scope으로 저장)
+        if not confirmation_message_sent and state_manager.current_step != ChatStep.INTRODUCTION:
+            if not classification_result or not classification_result.get("extracted_fields"):
+                step_key_mapping = {
+                    ChatStep.WORK_SCOPE: "work_scope",
+                    ChatStep.WORK_PERIOD: "work_period",
+                    ChatStep.BUDGET: "budget",
+                    ChatStep.REVISIONS: "revision_count",
+                    ChatStep.COPYRIGHT: "copyright_owner",
+                    ChatStep.CONFIDENTIALITY: "confidentiality_terms",
+                }
+                step_key = step_key_mapping.get(state_manager.current_step)
+                if step_key and user_query.strip():
+                    state_manager.update_data(step_key, user_query.strip())
+                    ctx.log.info(f"[WS]        -- Auto-saved user input to collected_data[{step_key}]: {user_query[:50]}...")
+
         
         # 7. LLM에 전달할 프롬프트 구성
         
@@ -377,16 +426,32 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         except Exception:
             collected_data_json = str(state_manager.collected_data)
             role_inputs_json = str(state_manager.role_inputs)
+        
+        ctx.log.info(f"[WS]        -- Collected data: {collected_data_json[:150]}")  # 디버깅용
 
+        # 이전 단계 정보 (STEP_TRANSITION_PROMPT에서 사용)
+        previous_step_value = state_manager.step_history[-2].value if len(state_manager.step_history) >= 2 else ChatStep.INTRODUCTION.value
+        previous_step_prompt = state_manager.step_history[-2].prompt if len(state_manager.step_history) >= 2 else STEP_PROMPTS.get(ChatStep.INTRODUCTION.value, "")
+        
+        # collected_data에서 null이 아닌 항목만 추출 (이미 수집된 정보)
+        collected_fields_summary = []
+        for key, value in state_manager.collected_data.items():
+            if value is not None and value != "":
+                collected_fields_summary.append(f"- {key}: {value}")
+        collected_fields_str = "\n".join(collected_fields_summary) if collected_fields_summary else "아직 수집된 정보가 없습니다."
+        
         common_placeholders = {
             "user_name": state_manager.user_info.get("user_name") or asker or "사용자",
             "role": state_manager.user_info.get("role") or hd.get("role") or "client",
             "role_korean": role_korean,
             "contract_date": state_manager.user_info.get("contract_date") or hd.get("contract_date") or "",
             "current_step": state_manager.current_step.value,
+            "previous_step": previous_step_value,
             "step_guide": current_step_prompt,
+            "previous_step_guide": previous_step_prompt,
             "conversation_context": conversation_context,
             "collected_data_json": collected_data_json,
+            "collected_fields_summary": collected_fields_str,  # 새로 추가: 가독성 좋은 요약
             "role_inputs_json": role_inputs_json,
             "contract_template": CONTRACT_TEMPLATE,
             "previous_contract_draft": previous_contract_draft or "없음",
