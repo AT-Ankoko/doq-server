@@ -16,7 +16,7 @@ async def store_chat_message(ctx, sid: str, participant: str, msg: dict, stream_
         msg: 메시지 객체 (dict)
             - hd: 헤더 정보 {"role": "client" | "provider", ...}
             - bd: 바디 정보 {"text": "...", ...}
-        stream_key: Redis stream 키 (기본값: `chat:session:{sid}`)
+        stream_key: Redis stream 키 (기본값: `session:chat:{sid}`)
     
     Redis Stream 저장 형태:
     {
@@ -30,7 +30,7 @@ async def store_chat_message(ctx, sid: str, participant: str, msg: dict, stream_
     - AI 응답: participant="assistant"
     """
     try:
-        key = stream_key or f"chat:session:{sid}"
+        key = stream_key or f"session:chat:{sid}"
         body_json = orjson.dumps(msg).decode()
         payload = {
             "participant": participant,

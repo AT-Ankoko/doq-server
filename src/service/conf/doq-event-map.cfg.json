@@ -18,8 +18,8 @@
       }
     },
     "redis": {
-      "chat:session:*": {
-        "stream_key": "chat:session:*",
+      "session:chat:*": {
+        "stream_key": "session:chat:*",
         "description": "세션별 채팅 메시지 저장소"
       }
     }

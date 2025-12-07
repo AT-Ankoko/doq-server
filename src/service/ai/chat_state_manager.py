@@ -227,7 +227,7 @@ class SessionStateCache:
     """세션 상태 캐시 (Redis + 메모리 캐싱)"""
 
     _cache: Dict[str, ChatStateManager] = {}
-    _REDIS_PREFIX = "chat:session_state:"
+    _REDIS_PREFIX = "session:chat_state:"
 
     @classmethod
     def _redis_key(cls, sid: str) -> str:

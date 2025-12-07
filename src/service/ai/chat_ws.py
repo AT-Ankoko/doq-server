@@ -146,7 +146,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             }
             state_manager = ChatStateManager(sid, user_info)
             await SessionStateCache.save(state_manager, ctx)
-            
+        
             # 역할 한글 표현
             role_korean = "의뢰인(갑)" if user_info.get('role') == 'client' else "용역자(을)"
             ctx.log.info(f"[WS]        -- New session state created for {sid}, user: {user_info.get('user_name')} ({user_info.get('role')})")
@@ -174,7 +174,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         # 4. 대화 이력 가져오기 (Redis에서)
         chat_history = []
         previous_contract_draft = None  # 이전 contract_draft 저장
-        stream_key = f"chat:session:{sid}"
+        stream_key = f"session:chat:{sid}"
         try:
             redis_client = ctx.redis_handler.get_client()
             messages = await redis_client.xrange(stream_key, count=20)  # 최근 20개 메시지
@@ -274,6 +274,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 ctx.log.info(f"[WS]        -- Step advance decision: {should_advance}, reason={parsed.get('reason')}")
             else:
                 raise ValueError("Cannot parse advance decision")
+            
         except Exception as e:
             ctx.log.warning(f"[WS]        -- Step advance classification failed, fallback to keyword: {e}")
             should_advance = state_manager.handle_user_confirm(user_query)
@@ -286,12 +287,14 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         if should_advance:
             # INTRODUCTION 단계를 포함한 모든 단계에서 진행 가능
             next_step = state_manager.move_to_next_step()
+
             # 혹시라도 current_step이 string이면 Enum으로 변환
             if not isinstance(state_manager.current_step, ChatStep):
                 try:
                     state_manager.current_step = ChatStep(state_manager.current_step)
                 except Exception:
                     state_manager.current_step = ChatStep.INTRODUCTION
+
             # step_history도 Enum만 유지
             state_manager.step_history = [s if isinstance(s, ChatStep) else ChatStep(s) for s in state_manager.step_history]
             await SessionStateCache.save(state_manager, ctx)
