@@ -195,7 +195,7 @@ class LLMManager:
                 "extracted_fields": dict,  # 수집된 데이터 필드
             }
         """
-        from src.service.ai.asset.prompts.doq_chat_scenario import RESPONSE_CLASSIFICATION_PROMPT
+        from src.service.ai.asset.prompts.doq_prompts_chat_scenario import RESPONSE_CLASSIFICATION_PROMPT
         
         # 분류용 프롬프트 구성
         classification_prompt = self._compose_prompt(

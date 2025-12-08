@@ -4,13 +4,7 @@ from src.utils.chat_stream_utils import store_chat_message
 from src.service.ai.chat_state_manager import SessionStateCache, ChatStateManager, ChatStep, ChatEvent
 
 from src.service.ai.asset.prompts.prompts_cfg import SYSTEM_PROMPTS
-from src.service.ai.asset.prompts.doq_chat_scenario import (
-    NORMAL_RESPONSE_PROMPT_TEMPLATE,
-    STEP_TRANSITION_PROMPT_TEMPLATE,
-    STEP_ADVANCE_CLASSIFICATION_PROMPT,
-    START_MESSAGE_PROMPT,
-    STEP_PROMPTS,
-)
+import src.service.ai.asset.prompts.doq_prompts_chat_scenario as scenario
 from src.service.ai.asset.prompts.doq_contract_template import CONTRACT_TEMPLATE
 from src.service.ai.rag_manager import RAGManager
 
@@ -73,7 +67,7 @@ async def websocket_chat(websocket: WebSocket):
             contract_date = websocket.query_params.get("contract_date")
 
         # START_MESSAGE_PROMPT 렌더링 (간단 치환)
-        greeting_text = START_MESSAGE_PROMPT
+        greeting_text = scenario.START_MESSAGE_PROMPT
         greeting_text = greeting_text.replace("{{client_name}}", client_name)
         greeting_text = greeting_text.replace("{{service_provider_name}}", provider_name)
 
@@ -282,7 +276,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         should_advance = False
         try:
             decision_text = await manager.generate(
-                STEP_ADVANCE_CLASSIFICATION_PROMPT,
+                scenario.STEP_ADVANCE_CLASSIFICATION_PROMPT,
                 placeholders={
                     "conversation_context": conversation_context,
                     "current_step": state_manager.current_step.value,
@@ -373,8 +367,32 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             else:
                 progress_percentage = 100.0
 
+            # 단계별 한국어 명칭 매핑
+            step_names_kr = {
+                ChatStep.INTRODUCTION: "소개",
+                ChatStep.WORK_SCOPE: "작업 범위 확인",
+                ChatStep.WORK_PERIOD: "작업 기간 설정",
+                ChatStep.BUDGET: "대금 및 지급 조건",
+                ChatStep.REVISIONS: "수정 조건",
+                ChatStep.COPYRIGHT: "저작권 귀속",
+                ChatStep.CONFIDENTIALITY: "비밀 유지 및 특약",
+                ChatStep.CONFLICT_RESOLUTION: "의견 조율",
+                ChatStep.FINALIZATION: "최종 확인",
+                ChatStep.COMPLETED: "계약서 작성 완료"
+            }
+
+            # 이전 단계 이름 가져오기
+            prev_step = state_manager.step_history[-2] if len(state_manager.step_history) >= 2 else None
+            prev_step_name = step_names_kr.get(prev_step, "이전") if prev_step else "소개"
+            
+            # 현재(다음) 단계 이름 가져오기
+            next_step_name = step_names_kr.get(next_step, next_step.value)
+
             # 확정 메시지 전송 (다음 단계 안내)
-            response_text = f"다음 단계로 이동합니다. (현재: {next_step.value}, 진행률: {progress_percentage}%)"
+            template_key = "complete" if next_step == ChatStep.COMPLETED else "next"
+            template = scenario.MESSAGE_TEMPLATES[template_key]
+            response_text = template.format(step=prev_step_name, next_step=next_step_name)
+
             confirmation_response = {
                 "hd": {
                     "sid": sid,
@@ -468,7 +486,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
 
         # 이전 단계 정보 (STEP_TRANSITION_PROMPT에서 사용)
         previous_step_value = state_manager.step_history[-2].value if len(state_manager.step_history) >= 2 else ChatStep.INTRODUCTION.value
-        previous_step_prompt = state_manager.step_history[-2].prompt if len(state_manager.step_history) >= 2 else STEP_PROMPTS.get(ChatStep.INTRODUCTION.value, "")
+        previous_step_prompt = state_manager.step_history[-2].prompt if len(state_manager.step_history) >= 2 else scenario.STEP_PROMPTS.get(ChatStep.INTRODUCTION.value, "")
         
         # collected_data에서 null이 아닌 항목만 추출 (이미 수집된 정보)
         collected_fields_summary = []
@@ -536,7 +554,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         if classification_result and classification_result.get("next_action") == "ask_clarification":
             # clarification이 필요한 경우에도 LLM이 전체 응답 생성 (USER_MESSAGE + CONTRACT_DRAFT 포함)
             ctx.log.info(f"[WS]        -- Clarification needed for step: {state_manager.current_step.value}")
-            full_prompt = NORMAL_RESPONSE_PROMPT_TEMPLATE.replace("{system_prompt}", "\n".join(SYSTEM_PROMPTS))
+            full_prompt = scenario.NORMAL_RESPONSE_PROMPT_TEMPLATE.replace("{system_prompt}", "\n".join(SYSTEM_PROMPTS))
             
             # clarification 요청 내용을 프롬프트에 추가
             response_placeholders = {
@@ -552,7 +570,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             )
         elif confirmation_message_sent:
             # 확정 메시지를 보낸 후, 다음 step의 시작 프롬프트 생성
-            full_prompt = STEP_TRANSITION_PROMPT_TEMPLATE.replace("{system_prompt}", "\n".join(SYSTEM_PROMPTS))
+            full_prompt = scenario.STEP_TRANSITION_PROMPT_TEMPLATE.replace("{system_prompt}", "\n".join(SYSTEM_PROMPTS))
             
             response_text = await manager.generate(
                 full_prompt,
@@ -562,7 +580,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             )
         else:
             # 정상적인 LLM 응답 생성
-            full_prompt = NORMAL_RESPONSE_PROMPT_TEMPLATE.replace("{system_prompt}", "\n".join(SYSTEM_PROMPTS))
+            full_prompt = scenario.NORMAL_RESPONSE_PROMPT_TEMPLATE.replace("{system_prompt}", "\n".join(SYSTEM_PROMPTS))
             
             # 정상 응답용 추가 placeholders
             response_placeholders = {

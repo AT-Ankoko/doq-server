@@ -9,7 +9,7 @@ import re
 import orjson
 import src.utils.redis_basic_utils as ru
 from src.service.ai.asset.prompts.doq_prompts_confirmation import _CONFIRM_PATTERNS
-from src.service.ai.asset.prompts.doq_chat_scenario import STEP_PROMPTS
+from src.service.ai.asset.prompts.doq_prompts_chat_scenario import STEP_PROMPTS
 
 class ChatEvent(Enum):
     """WebSocket 이벤트 타입"""
