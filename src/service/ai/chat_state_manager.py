@@ -85,15 +85,23 @@ class ChatStateManager:
         self.created_at = datetime.now().isoformat()
         self.updated_at = datetime.now().isoformat()
     
-    def handle_user_confirm(self, user_text: str) -> bool:
+    def check_confirm_pattern(self, user_text: str) -> bool:
         """
-        사용자의 응답이 확정/진행 의사로 해석될 경우 다음 단계로 이동
+        사용자의 응답이 확정/진행 의사 패턴과 일치하는지 확인 (상태 변경 없음)
         """
         text = (user_text or "").strip()
         for pattern in _CONFIRM_PATTERNS:
             if re.search(pattern, text, flags=re.IGNORECASE):
-                self.move_to_next_step()
                 return True
+        return False
+
+    def handle_user_confirm(self, user_text: str) -> bool:
+        """
+        사용자의 응답이 확정/진행 의사로 해석될 경우 다음 단계로 이동
+        """
+        if self.check_confirm_pattern(user_text):
+            self.move_to_next_step()
+            return True
         return False
     
     def move_to_next_step(self) -> ChatStep:

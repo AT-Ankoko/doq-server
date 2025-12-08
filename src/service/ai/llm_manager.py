@@ -77,12 +77,16 @@ class LLMManager:
                 "아래의 문서와 사용자의 질문을 참고하여 답변하세요.\n"
                 "문서:\n{{context}}\n\n질문: {{query}}\n답변:"
             )
-        rag_prompt = self._render_placeholders(prompt_template, {
-            "context": context,
-            "query": query,
-            **(placeholders or {})
-        })
-        return await self.generate(rag_prompt, **options)
+        
+        return await self.generate(
+            prompt_template,
+            placeholders={
+                "context": context,
+                "query": query,
+                **(placeholders or {})
+            },
+            **options
+        )
 
     async def generate(
         self,
@@ -91,12 +95,14 @@ class LLMManager:
         placeholders: Optional[Dict[str, Any]] = None,
         **options
     ) -> str:
-        final_prompt = self._compose_prompt(prompt, placeholders=placeholders)
+        # 프롬프트 인젝션 탐지 (placeholders 검사)
+        if placeholders:
+            for key, value in placeholders.items():
+                if isinstance(value, str) and self._is_prompt_injection(value):
+                    self.ctx.log.warning("LLM", f"-- Prompt injection detected in placeholder '{key}'")
+                    return "아직 없는 기능입니다"
 
-        # 프롬프트 인젝션 탐지
-        if self._is_prompt_injection(final_prompt):
-            self.ctx.log.warning("LLM", f"-- Prompt injection detected in final_prompt")
-            return "아직 없는 기능입니다"
+        final_prompt = self._compose_prompt(prompt, placeholders=placeholders)
 
         if self.provider == "gemini":
             generation_config = genai.types.GenerationConfig(**options)

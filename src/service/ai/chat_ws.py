@@ -372,7 +372,14 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             
         except Exception as e:
             ctx.log.warning(f"[WS]        -- Step advance classification failed, fallback to keyword: {e}")
+            # 예외 발생 시에만 handle_user_confirm 호출 (상태 변경 포함)
             should_advance = state_manager.handle_user_confirm(user_query)
+
+        # [Relaxation] LLM이 False라고 했더라도, 사용자가 명확한 진행 키워드를 사용했다면 진행 (상태 변경 없이 플래그만 True)
+        # 실제 상태 변경은 아래 if should_advance: 블록에서 move_to_next_step() 호출로 처리됨
+        if not should_advance and state_manager.check_confirm_pattern(user_query):
+            should_advance = True
+            ctx.log.info(f"[WS]        -- Step advance override by keyword pattern: {user_query}")
 
         # 추가 폴백: 소개 단계에서 사용자가 의미 있는 입력을 하면 진행
         if not should_advance and state_manager.current_step == ChatStep.INTRODUCTION and user_query.strip():
