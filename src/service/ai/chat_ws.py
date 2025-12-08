@@ -281,14 +281,34 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 
                 detection_res = await manager.generate(detection_prompt, temperature=0.1)
                 
-                det_json_match = re.search(r"```json\s*(.*?)\s*```", detection_res, re.DOTALL)
-                det_json_str = det_json_match.group(1) if det_json_match else detection_res
-                
+                # 파싱 로직 강화: 다양한 형식 처리
                 det_parsed = None
+                det_json_str = detection_res.strip()
+                
+                # 1차: 마크다운 코드블록에서 추출
+                det_json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", detection_res, re.DOTALL)
+                if det_json_match:
+                    det_json_str = det_json_match.group(1)
+                
+                # 2차: 순수 JSON 객체 추출 (코드블록 없이 {...} 형태)
+                if not det_json_match:
+                    json_obj_match = re.search(r"(\{[^{}]*\"is_question\"[^{}]*\})", detection_res, re.DOTALL)
+                    if json_obj_match:
+                        det_json_str = json_obj_match.group(1)
+                
+                # 3차: JSON 파싱 시도
                 try:
                     det_parsed = orjson.loads(det_json_str)
-                except:
-                    pass
+                except Exception:
+                    # 4차: is_question 값만 추출 (불완전한 JSON 대응)
+                    is_q_match = re.search(r'"is_question"\s*:\s*(true|false)', detection_res, re.IGNORECASE)
+                    if is_q_match:
+                        is_question_val = is_q_match.group(1).lower() == "true"
+                        search_q_match = re.search(r'"search_query"\s*:\s*"([^"]*)"', detection_res)
+                        det_parsed = {
+                            "is_question": is_question_val,
+                            "search_query": search_q_match.group(1) if search_q_match else ""
+                        }
                 
                 if det_parsed and det_parsed.get("is_question"):
                     search_q = det_parsed.get("search_query") or user_query
@@ -339,6 +359,9 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         conversation_context = "\n".join(chat_history[-10:])  # 최근 10개만 사용
         current_step_prompt = state_manager.current_step.prompt
         should_advance = False
+        
+        # [DEBUG] 프론트 전송용 step advance 메타 정보
+        step_advance_meta = {"advance": False, "reason": "", "source": "llm"}
         try:
             decision_text = await manager.generate(
                 scenario.STEP_ADVANCE_CLASSIFICATION_PROMPT,
@@ -352,20 +375,46 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 temperature=0.2,
             )
 
-            decision_json_match = re.search(r"```json\s*(.*?)\s*```", decision_text, re.DOTALL)
-            decision_json_str = decision_json_match.group(1) if decision_json_match else decision_text
+            # 파싱 로직 강화: 다양한 형식 처리
+            decision_json_str = decision_text.strip()
+            
+            # 1차: 마크다운 코드블록에서 추출
+            decision_json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", decision_text, re.DOTALL)
+            if decision_json_match:
+                decision_json_str = decision_json_match.group(1)
+            
+            # 2차: 순수 JSON 객체 추출 (코드블록 없이 {...} 형태)
+            if not decision_json_match:
+                json_obj_match = re.search(r"(\{[^{}]*\"advance\"[^{}]*\})", decision_text, re.DOTALL)
+                if json_obj_match:
+                    decision_json_str = json_obj_match.group(1)
 
             # 관대하게 파싱: 불리언 문자열/대소문자 섞여도 허용
             parsed = None
             try:
                 parsed = orjson.loads(decision_json_str)
             except Exception:
-                # 단순 true/false 문자열만 온 경우 처리
-                text_lower = decision_json_str.strip().lower()
-                if text_lower in ("true", "false"):
-                    parsed = {"advance": text_lower == "true", "reason": "boolean_only"}
+                # 3차: advance 값만 추출 (불완전한 JSON 대응)
+                adv_match = re.search(r'"advance"\s*:\s*(true|false)', decision_text, re.IGNORECASE)
+                if adv_match:
+                    advance_val = adv_match.group(1).lower() == "true"
+                    reason_match = re.search(r'"reason"\s*:\s*"([^"]*)"', decision_text)
+                    parsed = {
+                        "advance": advance_val,
+                        "reason": reason_match.group(1) if reason_match else "regex_extracted"
+                    }
+                else:
+                    # 4차: 단순 true/false 문자열만 온 경우 처리
+                    text_lower = decision_json_str.strip().lower()
+                    if text_lower in ("true", "false"):
+                        parsed = {"advance": text_lower == "true", "reason": "boolean_only"}
             if parsed:
                 should_advance = bool(parsed.get("advance"))
+                step_advance_meta = {
+                    "advance": should_advance,
+                    "reason": parsed.get("reason", ""),
+                    "source": "llm"
+                }
                 ctx.log.info(f"[WS]        -- Step advance decision: {should_advance}, reason={parsed.get('reason')}")
             else:
                 raise ValueError("Cannot parse advance decision")
@@ -374,16 +423,31 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             ctx.log.warning(f"[WS]        -- Step advance classification failed, fallback to keyword: {e}")
             # 예외 발생 시에만 handle_user_confirm 호출 (상태 변경 포함)
             should_advance = state_manager.handle_user_confirm(user_query)
+            step_advance_meta = {
+                "advance": should_advance,
+                "reason": f"LLM 파싱 실패, 키워드 폴백: {str(e)[:50]}",
+                "source": "fallback"
+            }
 
         # [Relaxation] LLM이 False라고 했더라도, 사용자가 명확한 진행 키워드를 사용했다면 진행 (상태 변경 없이 플래그만 True)
         # 실제 상태 변경은 아래 if should_advance: 블록에서 move_to_next_step() 호출로 처리됨
         if not should_advance and state_manager.check_confirm_pattern(user_query):
             should_advance = True
+            step_advance_meta = {
+                "advance": True,
+                "reason": f"키워드 패턴 매칭: {user_query[:30]}",
+                "source": "keyword_override"
+            }
             ctx.log.info(f"[WS]        -- Step advance override by keyword pattern: {user_query}")
 
         # 추가 폴백: 소개 단계에서 사용자가 의미 있는 입력을 하면 진행
         if not should_advance and state_manager.current_step == ChatStep.INTRODUCTION and user_query.strip():
             should_advance = True
+            step_advance_meta = {
+                "advance": True,
+                "reason": "소개 단계 자동 진행 (사용자 입력 감지)",
+                "source": "auto_intro"
+            }
             ctx.log.info("[WS]        -- Auto-advance from introduction due to user input")
 
         if should_advance:
@@ -740,7 +804,11 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 "contract_draft": contract_draft,
                 "current_step": state_manager.current_step.value,
                 "progress_percentage": round((list(ChatStep).index(state_manager.current_step) / len(ChatStep)) * 100, 1),
-                "state": codes.ResponseStatus.SUCCESS if not is_error_response else codes.ResponseStatus.SERVER_ERROR
+                "state": codes.ResponseStatus.SUCCESS if not is_error_response else codes.ResponseStatus.SERVER_ERROR,
+                "meta": {
+                    "step_advance": step_advance_meta,
+                    "question_answered": question_answered
+                }
             }
         }
         
