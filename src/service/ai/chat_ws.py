@@ -6,6 +6,7 @@ from src.service.ai.chat_state_manager import SessionStateCache, ChatStateManage
 from src.service.ai.asset.prompts.prompts_cfg import SYSTEM_PROMPTS
 import src.service.ai.asset.prompts.doq_prompts_chat_scenario as scenario
 from src.service.ai.asset.prompts.doq_contract_template import CONTRACT_TEMPLATE
+from src.service.ai.asset.prompts.doq_prompts_rag import QUESTION_DETECTION_PROMPT, RAG_ANSWER_PROMPT, RAG_ANSWER_ALREADY_SENT_PROMPT
 from src.service.ai.rag_manager import RAGManager
 
 import src.common.common_codes as codes
@@ -266,6 +267,70 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         ctx.log.info(f"[WS]        -- Chat history loaded: {len(chat_history)} messages")
         if chat_history:
             ctx.log.debug(f"[WS]        -- History preview: {chat_history[-3:]}")  # 최근 3개
+
+        # [NEW] 4.5. 질문 감지 및 RAG 답변 (Question Answering)
+        # 사용자가 계약 내용 입력이 아닌, 용어 정의나 법률적 질문을 한 경우 먼저 답변을 제공
+        question_answered = False
+        if user_query.strip():
+            try:
+                # 프롬프트 파일에서 로드한 템플릿 사용
+                detection_prompt = QUESTION_DETECTION_PROMPT.format(
+                    user_query=user_query,
+                    current_step=state_manager.current_step.value
+                )
+                
+                detection_res = await manager.generate(detection_prompt, temperature=0.1)
+                
+                det_json_match = re.search(r"```json\s*(.*?)\s*```", detection_res, re.DOTALL)
+                det_json_str = det_json_match.group(1) if det_json_match else detection_res
+                
+                det_parsed = None
+                try:
+                    det_parsed = orjson.loads(det_json_str)
+                except:
+                    pass
+                
+                if det_parsed and det_parsed.get("is_question"):
+                    search_q = det_parsed.get("search_query") or user_query
+                    ctx.log.info(f"[WS]        -- Question detected: {search_q}")
+                    
+                    # RAG Search
+                    rag_manager_qa = RAGManager()
+                    rag_results_qa = rag_manager_qa.search(search_q, k=2)
+                    
+                    # Generate Answer
+                    ans_prompt = RAG_ANSWER_PROMPT.format(
+                        user_query=user_query,
+                        rag_context=rag_results_qa
+                    )
+                    
+                    rag_answer_text = await manager.generate(ans_prompt, temperature=0.7)
+                    
+                    # Send Answer Message
+                    ans_response = {
+                        "hd": {
+                            "sid": sid,
+                            "event": ChatEvent.LLM_RESPONSE.value,
+                            "role": "assistant",
+                            "asker": asker,
+                            "step": state_manager.current_step.value,
+                            "user_name": "DoQ",
+                            "role_name": "assistant",
+                            "type": "question_answer"
+                        },
+                        "bd": {
+                            "text": rag_answer_text,
+                            "state": codes.ResponseStatus.SUCCESS
+                        }
+                    }
+                    await store_chat_message(ctx, sid, "assistant", {"hd": ans_response["hd"], "bd": ans_response["bd"], "sid": sid})
+                    await websocket.send_json(ans_response)
+                    
+                    question_answered = True
+                    ctx.log.info(f"[WS]        -- Sent RAG answer for question")
+                    
+            except Exception as e:
+                ctx.log.warning(f"[WS]        -- Question detection/answering failed: {e}")
 
         # 5. 대화 로그 기반 단계 진행 의사 분류 (Gemini 호출)
         confirmation_message_sent = False
@@ -586,6 +651,10 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             # 정상적인 LLM 응답 생성
             full_prompt = scenario.NORMAL_RESPONSE_PROMPT_TEMPLATE.replace("{system_prompt}", "\n".join(SYSTEM_PROMPTS))
             
+            # [NEW] 질문 답변 후 복귀 지침 추가
+            if question_answered:
+                full_prompt += "\n" + RAG_ANSWER_ALREADY_SENT_PROMPT
+
             # 정상 응답용 추가 placeholders
             response_placeholders = {
                 **common_placeholders,
