@@ -365,8 +365,13 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             # 단계 전환 후 프롬프트 갱신
             current_step_prompt = state_manager.current_step.prompt
 
-            # 진행률도 Enum 기준으로 계산
-            progress_percentage = round((list(ChatStep).index(state_manager.current_step) / len(ChatStep)) * 100, 1)
+            # 진행률도 Enum 기준으로 계산 (0% ~ 100%)
+            total_steps = len(ChatStep)
+            current_idx = list(ChatStep).index(state_manager.current_step)
+            if total_steps > 1:
+                progress_percentage = round((current_idx / (total_steps - 1)) * 100, 1)
+            else:
+                progress_percentage = 100.0
 
             # 확정 메시지 전송 (다음 단계 안내)
             response_text = f"다음 단계로 이동합니다. (현재: {next_step.value}, 진행률: {progress_percentage}%)"
