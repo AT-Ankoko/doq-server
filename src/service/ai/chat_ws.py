@@ -509,10 +509,9 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         if current_step_key:
             val = state_manager.collected_data.get(current_step_key)
             if val:
-                step_specific_instruction = (
-                    f"[중요] 현재 단계의 핵심 정보인 '{current_step_key}'가 이미 '{val}'(으)로 수집되었습니다. "
-                    f"절대 '어떤 작업인가요?'와 같은 중복 질문을 하지 마세요. "
-                    f"대신 '{val}'에 대해 상대방(용역자/의뢰인)의 동의를 구하거나, 구체적인 세부 사항(수량, 일정, 스타일 등)을 질문하여 대화를 심화시키세요."
+                step_specific_instruction = scenario.STEP_SPECIFIC_INSTRUCTION_TEMPLATE.format(
+                    current_step_key=current_step_key,
+                    val=val
                 )
         
         # Redis에서 session_info 로드 (참여자 이름 확인) - 위에서 이미 로드함
@@ -528,6 +527,11 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 ctx.log.info(f"[WS]        -- RAG context retrieved: {len(rag_context)} chars")
         except Exception as e:
             ctx.log.warning(f"[WS]        -- RAG search failed: {e}")
+
+        # [최적화] 계약서 초안이 이미 존재하는 경우, 전체 템플릿 대신 요약 지침만 전달하여 프롬프트 길이 단축
+        template_to_use = CONTRACT_TEMPLATE
+        if previous_contract_draft and len(previous_contract_draft) > 50:
+            template_to_use = "아래 '계약서 초안'만 기준으로 수정 및 보완하세요. 전체 템플릿은 생략됨."
 
         common_placeholders = {
             "client_name": client_name_fixed,
@@ -545,7 +549,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             "collected_fields_summary": collected_fields_str,  # 새로 추가: 가독성 좋은 요약
             "step_specific_instruction": step_specific_instruction, # 동적 지침 추가
             "role_inputs_json": role_inputs_json,
-            "contract_template": CONTRACT_TEMPLATE,
+            "contract_template": template_to_use,
             "previous_contract_draft": previous_contract_draft or "없음",
             "rag_context": rag_context,
         }

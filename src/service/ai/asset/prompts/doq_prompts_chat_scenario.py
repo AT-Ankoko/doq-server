@@ -293,3 +293,9 @@ STEP_ADVANCE_CLASSIFICATION_PROMPT = """
 - 설명, 코드블럭, 마크다운 등은 절대 포함하지 마세요
 - 형식: {"advance": true|false, "reason": "판단 근거 간결하게 서술"}
 """
+
+STEP_SPECIFIC_INSTRUCTION_TEMPLATE = """
+[중요] 현재 단계의 핵심 정보인 '{current_step_key}'가 이미 '{val}'(으)로 수집되었습니다.
+절대 '어떤 작업인가요?'와 같은 중복 질문을 하지 마세요.
+대신 '{val}'에 대해 상대방(용역자/의뢰인)의 동의를 구하거나, 구체적인 세부 사항(수량, 일정, 스타일 등)을 질문하여 대화를 심화시키세요.
+"""
