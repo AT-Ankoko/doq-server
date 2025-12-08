@@ -12,6 +12,7 @@ from src.service.ai.asset.prompts.doq_chat_scenario import (
     STEP_PROMPTS,
 )
 from src.service.ai.asset.prompts.doq_contract_template import CONTRACT_TEMPLATE
+from src.service.ai.rag_manager import RAGManager
 
 import src.common.common_codes as codes
 import orjson
@@ -493,6 +494,18 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         
         # Redis에서 session_info 로드 (참여자 이름 확인) - 위에서 이미 로드함
         
+        # RAG 검색 (현재 단계 + 사용자 쿼리 기반)
+        rag_context = ""
+        try:
+            rag_manager = RAGManager()
+            # 검색 쿼리 구성: 현재 단계 키워드 + 사용자 입력
+            search_query = f"{state_manager.current_step.value} {user_query}"
+            rag_context = rag_manager.search(search_query, k=2)
+            if rag_context:
+                ctx.log.info(f"[WS]        -- RAG context retrieved: {len(rag_context)} chars")
+        except Exception as e:
+            ctx.log.warning(f"[WS]        -- RAG search failed: {e}")
+
         common_placeholders = {
             "client_name": client_name_fixed,
             "provider_name": provider_name_fixed,
@@ -511,6 +524,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             "role_inputs_json": role_inputs_json,
             "contract_template": CONTRACT_TEMPLATE,
             "previous_contract_draft": previous_contract_draft or "없음",
+            "rag_context": rag_context,
         }
         
         # 분류 결과가 있으면 clarification이 필요한지 체크

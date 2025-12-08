@@ -180,6 +180,10 @@ NORMAL_RESPONSE_PROMPT_TEMPLATE = """{system_prompt}
 {{collected_fields_summary}}  
 === 끝 ===
 
+=== 참고 법률/계약 조항 (RAG) ===
+{{rag_context}}
+=== 끝 ===
+
 === 계약서 초안 (지속적으로 업데이트) ===  
 {{previous_contract_draft}}  
 === 끝 ===
@@ -225,6 +229,10 @@ STEP_TRANSITION_PROMPT_TEMPLATE = """{system_prompt}
 
 === 현재까지 수집된 정보 (반복 질문 금지) ===
 {{collected_fields_summary}}
+=== 끝 ===
+
+=== 참고 법률/계약 조항 (RAG) ===
+{{rag_context}}
 === 끝 ===
 
 === 계약서 초안 (지속 업데이트) ===
