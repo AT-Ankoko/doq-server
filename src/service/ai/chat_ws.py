@@ -7,6 +7,7 @@ from src.service.ai.asset.prompts.prompts_cfg import SYSTEM_PROMPTS
 import src.service.ai.asset.prompts.doq_prompts_chat_scenario as scenario
 from src.service.ai.asset.prompts.doq_contract_template import CONTRACT_TEMPLATE
 from src.service.ai.asset.prompts.doq_prompts_rag import QUESTION_DETECTION_PROMPT, RAG_ANSWER_PROMPT, RAG_ANSWER_ALREADY_SENT_PROMPT
+from src.service.ai.asset.prompts.doq_prompts_confirmation import _CONTRACT_COMPLETION_PATTERNS
 from src.service.ai.rag_manager import RAGManager
 
 import src.common.common_codes as codes
@@ -450,6 +451,31 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             }
             ctx.log.info("[WS]        -- Auto-advance from introduction due to user input")
 
+        # [NEW] finalization 단계에서 계약서 완료 키워드 감지 시 completed로 강제 전환
+        is_contract_completion_request = False
+        if state_manager.current_step == ChatStep.FINALIZATION:
+            for pattern in _CONTRACT_COMPLETION_PATTERNS:
+                if re.search(pattern, user_query, flags=re.IGNORECASE):
+                    is_contract_completion_request = True
+                    should_advance = True
+                    step_advance_meta = {
+                        "advance": True,
+                        "reason": f"계약서 완료 키워드 감지: {user_query[:30]}",
+                        "source": "contract_completion"
+                    }
+                    ctx.log.info(f"[WS]        -- Contract completion keyword detected: {user_query}")
+                    break
+
+        # [CRITICAL] completed 단계에서는 더 이상 단계 진행하지 않음 (무한 루프 방지)
+        if state_manager.current_step == ChatStep.COMPLETED:
+            should_advance = False
+            step_advance_meta = {
+                "advance": False,
+                "reason": "이미 completed 단계 (최종 단계)",
+                "source": "completed_guard"
+            }
+            ctx.log.info("[WS]        -- Already at COMPLETED step, no further advancement")
+
         if should_advance:
             # INTRODUCTION 단계를 포함한 모든 단계에서 진행 가능
             
@@ -529,6 +555,36 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             template = scenario.MESSAGE_TEMPLATES[template_key]
             response_text = template.format(step=prev_step_name, next_step=next_step_name)
 
+            # [NEW] COMPLETED 단계 진입 시 계약서 전문 생성
+            final_contract_draft = None
+            if next_step == ChatStep.COMPLETED:
+                # 진행률 100%로 설정
+                progress_percentage = 100.0
+                
+                # 계약서 전문 생성 (이전 contract_draft가 있으면 사용, 없으면 LLM으로 생성)
+                if previous_contract_draft and len(previous_contract_draft) > 100:
+                    final_contract_draft = previous_contract_draft
+                    ctx.log.info(f"[WS]        -- Using existing contract draft for completion")
+                else:
+                    # LLM을 통해 최종 계약서 생성
+                    try:
+                        final_contract_prompt = scenario.FINAL_CONTRACT_GENERATION_PROMPT.format(
+                            collected_data_json=collected_data_json,
+                            contract_template=CONTRACT_TEMPLATE
+                        )
+                        final_contract_draft = await manager.generate(
+                            final_contract_prompt,
+                            max_output_tokens=4000,
+                            temperature=0.3
+                        )
+                        ctx.log.info(f"[WS]        -- Generated final contract draft via LLM")
+                    except Exception as e:
+                        ctx.log.warning(f"[WS]        -- Failed to generate final contract: {e}")
+                        final_contract_draft = previous_contract_draft or "계약서 생성에 실패했습니다. 다시 시도해주세요."
+                
+                # 완료 메시지 커스터마이징
+                response_text = scenario.COMPLETION_MESSAGE
+
             confirmation_response = {
                 "hd": {
                     "sid": sid,
@@ -542,6 +598,10 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 },
                 "bd": {
                     "text": response_text,
+                    "contract_draft": final_contract_draft,  # COMPLETED일 때 계약서 전문 포함
+                    "current_step": next_step.value,
+                    "progress_percentage": 100.0 if next_step == ChatStep.COMPLETED else progress_percentage,
+                    "is_completed": next_step == ChatStep.COMPLETED,  # 프론트엔드에서 세션 종료 처리용
                     "state": codes.ResponseStatus.SUCCESS
                 }
             }
@@ -551,7 +611,12 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             )
             await websocket.send_json(confirmation_response)
             confirmation_message_sent = True
-            # 계속 진행하여 다음 step의 프롬프트도 전송
+            
+            # [NEW] COMPLETED 단계면 여기서 처리 종료 (추가 LLM 호출 불필요)
+            if next_step == ChatStep.COMPLETED:
+                ctx.log.info(f"[WS]        -- Contract completed for session {sid}, no further LLM calls needed")
+                await SessionStateCache.save(state_manager, ctx)
+                return
 
         # 6. 현재 step에 맞는 프롬프트 가져오기
         # (이미 분류 시 계산됨)
