@@ -11,8 +11,8 @@ CHAT_ENDPOINT = "/v1/session/chat"
 SESSION_PREFIX = "full_scenario_test"
 
 # Participants (입력된 이름을 그대로 사용)
-CLIENT_NAME = "김진서"
-PROVIDER_NAME = "박정민"
+CLIENT_NAME = "정우성"
+PROVIDER_NAME = "백지오"
 
 SCENARIOS = [
     {
@@ -105,10 +105,14 @@ random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k
 
 
 async def send_message(websocket, role: str, text: str, display_name_map):
+    # 역할에 따른 사용자 이름 매핑
+    user_name = display_name_map.get(role, role) if display_name_map else role
+    
     msg = {
         "hd": {
             "event": "chat.message",
             "role": role,
+            "user_name": user_name,  # 실제 사용자 이름 추가
             "timestamp": datetime.now().isoformat()
         },
         "bd": {"text": text}
@@ -119,11 +123,15 @@ async def send_message(websocket, role: str, text: str, display_name_map):
     await asyncio.sleep(0.5) # Simulate typing delay
 
 async def trigger_llm(websocket, role="client", display_name_map=None):
+    # 역할에 따른 사용자 이름 매핑
+    user_name = display_name_map.get(role, role) if display_name_map else role
+    
     msg = {
         "hd": {
             "event": "chat.llm", # Maps to llm.invoke
             "role": role,
             "asker": role, # Who is asking for LLM response
+            "user_name": user_name,  # 실제 사용자 이름 추가
             "timestamp": datetime.now().isoformat()
         },
         "bd": {"text": ""} # Empty text for trigger
