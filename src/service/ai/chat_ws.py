@@ -731,10 +731,10 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         except Exception as e:
             ctx.log.warning(f"[WS]        -- RAG search failed: {e}")
 
-        # [최적화] 계약서 초안이 이미 존재하는 경우, 전체 템플릿 대신 요약 지침만 전달하여 프롬프트 길이 단축
+        # [수정] 항상 전체 템플릿을 제공하여 계약서 전문 생성을 유도
         template_to_use = CONTRACT_TEMPLATE
-        if previous_contract_draft and len(previous_contract_draft) > 50:
-            template_to_use = "아래 '계약서 초안'만 기준으로 수정 및 보완하세요. 전체 템플릿은 생략됨."
+        # if previous_contract_draft and len(previous_contract_draft) > 50:
+        #     template_to_use = "아래 '계약서 초안'만 기준으로 수정 및 보완하세요. 전체 템플릿은 생략됨."
 
         common_placeholders = {
             "client_name": client_name_fixed,
@@ -872,6 +872,10 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                     contract_draft = contract_match.group(1).strip()
             except Exception as e:
                 ctx.log.warning(f"[WS]        -- Failed to split response sections: {e}")
+
+        # [수정] 계약서 초안이 생성되지 않았거나 비어있다면, 이전 버전을 유지하여 항상 보이도록 함
+        if not contract_draft and previous_contract_draft:
+            contract_draft = previous_contract_draft
 
         response = {
             "hd": {
