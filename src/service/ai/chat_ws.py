@@ -7,7 +7,7 @@ from src.service.ai.asset.prompts.prompts_cfg import SYSTEM_PROMPTS
 import src.service.ai.asset.prompts.doq_prompts_chat_scenario as scenario
 from src.service.ai.asset.prompts.doq_contract_template import CONTRACT_TEMPLATE
 from src.service.ai.asset.prompts.doq_prompts_rag import QUESTION_DETECTION_PROMPT, RAG_ANSWER_PROMPT, RAG_ANSWER_ALREADY_SENT_PROMPT
-from src.service.ai.asset.prompts.doq_prompts_confirmation import _CONTRACT_COMPLETION_PATTERNS
+from src.service.ai.asset.prompts.doq_prompts_confirmation import _CONTRACT_COMPLETION_PATTERNS, CONFIRM_KEYWORDS, PROPOSAL_KEYWORDS
 from src.service.ai.rag_manager import RAGManager
 
 import src.common.common_codes as codes
@@ -512,25 +512,40 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             }
             ctx.log.info(f"[WS]        -- Step advance override by keyword pattern: {effective_user_query}")
 
-        # 추가 확정 키워드 간단 매칭 (패턴에 없을 때 대비)
-        # [중요] 양측 발화 확인: 최근 대화에 client와 provider 모두 있는지 체크
+        # [강화] 양측 합의 확인 로직: 키워드 + 양측 발화 + 순차적 동의 패턴 체크
         if not should_advance:
             # 최근 10개 대화에서 client와 provider 발화 확인
             has_client = any("client" in line or "의뢰인" in line for line in chat_history[-10:])
             has_provider = any("provider" in line or "용역자" in line for line in chat_history[-10:])
             both_participated = has_client and has_provider
             
-            confirm_keywords = ["알겠습니다", "동의", "합의", "진행하겠습니다", "괜찮습니다", "좋습니다", "승낙", "확정"]
-            if any(kw in effective_user_query for kw in confirm_keywords) and both_participated:
+            # 확정/제안 키워드 (프롬프트 파일에서 관리)
+            has_confirm_keyword = any(kw in effective_user_query for kw in CONFIRM_KEYWORDS)
+            has_proposal_keyword = any(kw in effective_user_query for kw in PROPOSAL_KEYWORDS)
+            
+            # 순차적 동의 패턴 확인: 최근 2개 메시지에서 제안→수락 흐름 체크
+            sequential_agreement = False
+            if len(chat_history) >= 2:
+                prev_line = chat_history[-2]
+                curr_line = chat_history[-1]
+                # 이전: client 제안, 현재: provider 수락 or 이전: provider 제안, 현재: client 수락
+                if ("client" in prev_line and "provider" in curr_line) or ("provider" in prev_line and "client" in curr_line):
+                    if any(kw in curr_line for kw in CONFIRM_KEYWORDS):
+                        sequential_agreement = True
+            
+            # 진행 조건: 양측 참여 + (확정 키워드 or 순차적 동의)
+            if both_participated and (has_confirm_keyword or sequential_agreement):
                 should_advance = True
                 step_advance_meta = {
                     "advance": True,
-                    "reason": f"간단 확정 키워드 매칭 (양측 참여 확인됨): {effective_user_query[:30]}",
-                    "source": "keyword_simple"
+                    "reason": f"양측 합의 확인 (양측 발화 + 동의 표현): {effective_user_query[:30]}",
+                    "source": "mutual_agreement"
                 }
-                ctx.log.info(f"[WS]        -- Step advance override by simple keyword (both participated): {effective_user_query}")
-            elif any(kw in effective_user_query for kw in confirm_keywords) and not both_participated:
-                ctx.log.info(f"[WS]        -- Keyword detected but only one side participated, waiting for other side")
+                ctx.log.info(f"[WS]        -- Step advance by mutual agreement: both participated + explicit consent")
+            elif has_proposal_keyword and not both_participated:
+                ctx.log.info(f"[WS]        -- Proposal detected but waiting for counterpart's response")
+            elif has_confirm_keyword and not both_participated:
+                ctx.log.info(f"[WS]        -- Consent keyword detected but only one side participated, waiting for counterpart")
 
         # 분류 결과가 단계 완료로 판단된 경우에도 진행 플래그 설정
         if not should_advance and classification_result and classification_result.get("is_complete"):
