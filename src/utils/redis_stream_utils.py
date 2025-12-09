@@ -100,3 +100,15 @@ async def redis_stream_wait_result(ctx, stream_key: str, timeout=10_000):
     except Exception as e:
         log.error("REDIS", f"-- Error reading stream '{stream_key}': {e}")
         return None
+
+
+# Stream 전체 조회 (XRANGE)
+async def redis_stream_range(ctx, stream_key, start="-", end="+", count=None):
+    try:
+        client = ctx.redis_handler.client
+        response = await client.xrange(stream_key, min=start, max=end, count=count)
+        # ctx.log.debug("REDIS", f"== XRANGE {stream_key} > {len(response)} items")
+        return response
+    except RedisError as e:
+        ctx.log.error("REDIS", f"-- XRANGE error: {stream_key}, {str(e)}")
+        return []
