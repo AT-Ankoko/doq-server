@@ -505,7 +505,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
 
             # 단계별 한국어 명칭 매핑
             step_names_kr = {
-                ChatStep.INTRODUCTION: "소개",
+                ChatStep.INTRODUCTION: "프로젝트 시작",
                 ChatStep.WORK_SCOPE: "작업 범위 확인",
                 ChatStep.WORK_PERIOD: "작업 기간 설정",
                 ChatStep.BUDGET: "대금 및 지급 조건",
