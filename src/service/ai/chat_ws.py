@@ -112,6 +112,13 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         bd = msg.get("bd", {})
         asker = hd.get("asker") or hd.get("role")
         user_query = bd.get("text") or ""
+
+        async def send_json_safe(payload):
+            try:
+                await websocket.send_json(payload)
+            except Exception as send_err:
+                ctx.log.warning(f"[WS]        -- Skipped send after close: {send_err}")
+                return
         
         ctx.log.info(f"[WS]        -- LLM invocation (asker={asker}) in session {sid}")
         ctx.log.debug(f"[WS]        -- Message: {msg}")
@@ -147,7 +154,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 ctx, sid, "assistant", 
                 {"hd": response["hd"], "bd": response["bd"], "sid": sid}
             )
-            await websocket.send_json(response)
+            await send_json_safe(response)
             return
         
         # Redis에서 session_info 로드 (참여자 이름 확인)
@@ -353,7 +360,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                         }
                     }
                     await store_chat_message(ctx, sid, "assistant", {"hd": ans_response["hd"], "bd": ans_response["bd"], "sid": sid})
-                    await websocket.send_json(ans_response)
+                    await send_json_safe(ans_response)
                     
                     question_answered = True
                     ctx.log.info(f"[WS]        -- Sent RAG answer for question")
@@ -361,11 +368,67 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             except Exception as e:
                 ctx.log.warning(f"[WS]        -- Question detection/answering failed: {e}")
 
-        # 5. 대화 로그 기반 단계 진행 의사 분류 (Gemini 호출)
+        # 5. 사용자 응답 분류 및 데이터 추출 (단계 진행 판단보다 먼저 수행)
+        classification_result = None
+        if state_manager.current_step != ChatStep.INTRODUCTION:
+            try:
+                classification_placeholders = {
+                    "current_step": state_manager.current_step.value,
+                    "user_response": user_query,
+                    "user_name": state_manager.user_info.get("user_name") or asker,
+                    "role": role
+                }
+                classification_result = await manager.classify_response(
+                    user_response=user_query,
+                    current_step=state_manager.current_step.value,
+                    placeholders=classification_placeholders
+                )
+                ctx.log.debug(f"[WS]        -- Response classification: {classification_result}")
+
+                # 분류 결과에서 추출된 데이터 저장
+                if classification_result.get("extracted_fields"):
+                    for key, value in classification_result["extracted_fields"].items():
+                        state_manager.update_data(key, value)
+
+                ctx.log.info(f"[WS]        -- Extracted fields saved: {classification_result.get('extracted_fields', {})}")
+            except Exception as e:
+                ctx.log.warning(f"[WS]        -- Response classification failed: {e}")
+                classification_result = None
+
+        # 분류 실패 시 현재 단계에 맞게 간단히 데이터 저장
+        if state_manager.current_step != ChatStep.INTRODUCTION:
+            if not classification_result or not classification_result.get("extracted_fields"):
+                step_key_mapping = {
+                    ChatStep.WORK_SCOPE: "work_scope",
+                    ChatStep.WORK_PERIOD: "work_period",
+                    ChatStep.BUDGET: "budget",
+                    ChatStep.REVISIONS: "revision_count",
+                    ChatStep.COPYRIGHT: "copyright_owner",
+                    ChatStep.CONFIDENTIALITY: "confidentiality_terms",
+                }
+                step_key = step_key_mapping.get(state_manager.current_step)
+                if step_key and user_query.strip():
+                    state_manager.update_data(step_key, user_query.strip())
+                    ctx.log.info(f"[WS]        -- Auto-saved user input to collected_data[{step_key}]: {user_query[:50]}...")
+
+        # 6. 대화 로그 기반 단계 진행 의사 분류 (Gemini 호출)
         confirmation_message_sent = False
         # chat_history를 다시 정렬 (역순으로 추출했으므로)
         chat_history.reverse()
         conversation_context = "\n".join(chat_history[-10:])  # 최근 10개만 사용
+
+        # [Enhance] llm.trigger 요청 시 user_query가 비어 있을 수 있어, 직전 사용자 발화로 대체
+        def _extract_last_user_text(history_list):
+            if not history_list:
+                return ""
+            last_line = history_list[-1]
+            # 형식 예: "client(의뢰인(갑)): 내용" 또는 "provider: 내용"
+            if ":" in last_line:
+                return last_line.split(":", 1)[1].strip()
+            return last_line.strip()
+
+        effective_user_query = user_query.strip() or _extract_last_user_text(chat_history)
+
         current_step_prompt = state_manager.current_step.prompt
         should_advance = False
         
@@ -378,10 +441,10 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                     "conversation_context": conversation_context,
                     "current_step": state_manager.current_step.value,
                     "current_step_prompt": current_step_prompt,
-                    "user_query": user_query,
+                    "user_query": effective_user_query,
                 },
-                max_output_tokens=200,
-                temperature=0.2,
+                max_output_tokens=800,
+                temperature=0.0
             )
 
             # 파싱 로직 강화: 다양한 형식 처리
@@ -440,14 +503,36 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
 
         # [Relaxation] LLM이 False라고 했더라도, 사용자가 명확한 진행 키워드를 사용했다면 진행 (상태 변경 없이 플래그만 True)
         # 실제 상태 변경은 아래 if should_advance: 블록에서 move_to_next_step() 호출로 처리됨
-        if not should_advance and state_manager.check_confirm_pattern(user_query):
+        if not should_advance and state_manager.check_confirm_pattern(effective_user_query):
             should_advance = True
             step_advance_meta = {
                 "advance": True,
-                "reason": f"키워드 패턴 매칭: {user_query[:30]}",
+                "reason": f"키워드 패턴 매칭: {effective_user_query[:30]}",
                 "source": "keyword_override"
             }
-            ctx.log.info(f"[WS]        -- Step advance override by keyword pattern: {user_query}")
+            ctx.log.info(f"[WS]        -- Step advance override by keyword pattern: {effective_user_query}")
+
+        # 추가 확정 키워드 간단 매칭 (패턴에 없을 때 대비)
+        if not should_advance:
+            confirm_keywords = ["알겠습니다", "동의", "합의", "진행하겠습니다", "괜찮습니다", "좋습니다", "승낙", "확정"]
+            if any(kw in effective_user_query for kw in confirm_keywords):
+                should_advance = True
+                step_advance_meta = {
+                    "advance": True,
+                    "reason": f"간단 확정 키워드 매칭: {effective_user_query[:30]}",
+                    "source": "keyword_simple"
+                }
+                ctx.log.info(f"[WS]        -- Step advance override by simple keyword: {effective_user_query}")
+
+        # 분류 결과가 단계 완료로 판단된 경우에도 진행 플래그 설정
+        if not should_advance and classification_result and classification_result.get("is_complete"):
+            should_advance = True
+            step_advance_meta = {
+                "advance": True,
+                "reason": "응답 분류에서 완료로 판단",
+                "source": "classification"
+            }
+            ctx.log.info("[WS]        -- Step advance by classification is_complete flag")
 
         # 추가 폴백: 소개 단계에서 사용자가 의미 있는 입력을 하면 진행
         if not should_advance and state_manager.current_step == ChatStep.INTRODUCTION and user_query.strip():
@@ -463,15 +548,15 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         is_contract_completion_request = False
         if state_manager.current_step == ChatStep.FINALIZATION:
             for pattern in _CONTRACT_COMPLETION_PATTERNS:
-                if re.search(pattern, user_query, flags=re.IGNORECASE):
+                if re.search(pattern, effective_user_query, flags=re.IGNORECASE):
                     is_contract_completion_request = True
                     should_advance = True
                     step_advance_meta = {
                         "advance": True,
-                        "reason": f"계약서 완료 키워드 감지: {user_query[:30]}",
+                        "reason": f"계약서 완료 키워드 감지: {effective_user_query[:30]}",
                         "source": "contract_completion"
                     }
-                    ctx.log.info(f"[WS]        -- Contract completion keyword detected: {user_query}")
+                    ctx.log.info(f"[WS]        -- Contract completion keyword detected: {effective_user_query}")
                     break
 
         # [CRITICAL] completed 단계에서는 더 이상 단계 진행하지 않음 (무한 루프 방지)
@@ -502,8 +587,8 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             
             # introduction → work_scope 특수 케이스 처리
             if state_manager.current_step == ChatStep.INTRODUCTION:
-                if user_query.strip() and state_manager.collected_data.get("work_scope") is None:
-                    state_manager.update_data("work_scope", user_query.strip())
+                if effective_user_query.strip() and state_manager.collected_data.get("work_scope") is None:
+                    state_manager.update_data("work_scope", effective_user_query.strip())
                     ctx.log.info(f"[WS]        -- Auto-saved user input from introduction to work_scope: {user_query[:50]}...")
             else:
                 # 다른 단계에서의 입력 저장 (현재 단계 필드에)
@@ -542,15 +627,15 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                             ctx.log.info(f"[WS]        -- Summarized and saved {current_field}: {extracted_value}")
                         else:
                             # 요약 실패 시 기존 방식(마지막 입력) 폴백
-                            if user_query.strip() and state_manager.collected_data.get(current_field) is None:
-                                state_manager.update_data(current_field, user_query.strip())
+                            if effective_user_query.strip() and state_manager.collected_data.get(current_field) is None:
+                                state_manager.update_data(current_field, effective_user_query.strip())
                                 ctx.log.info(f"[WS]        -- Summary failed, fallback to user input for {current_field}")
 
                     except Exception as e:
                         ctx.log.warning(f"[WS]        -- Step summary failed: {e}")
                         # 예외 발생 시 기존 방식 폴백
-                        if user_query.strip() and state_manager.collected_data.get(current_field) is None:
-                            state_manager.update_data(current_field, user_query.strip())
+                        if effective_user_query.strip() and state_manager.collected_data.get(current_field) is None:
+                            state_manager.update_data(current_field, effective_user_query.strip())
             
             next_step = state_manager.move_to_next_step()
 
@@ -657,7 +742,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 ctx, sid, "assistant",
                 {"hd": confirmation_response["hd"], "bd": confirmation_response["bd"], "sid": sid}
             )
-            await websocket.send_json(confirmation_response)
+            await send_json_safe(confirmation_response)
             confirmation_message_sent = True
             
             # [NEW] COMPLETED 단계면 여기서 처리 종료 (추가 LLM 호출 불필요)
@@ -668,54 +753,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
 
         # 6. 현재 step에 맞는 프롬프트 가져오기
         # (이미 분류 시 계산됨)
-        
-        # 6.5. 응답 분류 및 데이터 추출 (옵션: 사용자 응답 분석)
-        # introduction 제외 모든 단계에서 응답 분석 (단, 단계 진행 후 아님)
-        classification_result = None
-        if not confirmation_message_sent and state_manager.current_step != ChatStep.INTRODUCTION:
-            try:
-                classification_placeholders = {
-                    "current_step": state_manager.current_step.value,
-                    "user_response": user_query,
-                    "user_name": state_manager.user_info.get("user_name") or asker,
-                    "role": role
-                }
-                
-                classification_result = await manager.classify_response(
-                    user_response=user_query,
-                    current_step=state_manager.current_step.value,
-                    placeholders=classification_placeholders
-                )
-                ctx.log.debug(f"[WS]        -- Response classification: {classification_result}")
-                
-                # 분류 결과에서 추출된 데이터 저장
-                if classification_result.get("extracted_fields"):
-                    for key, value in classification_result["extracted_fields"].items():
-                        state_manager.update_data(key, value)
-                
-                ctx.log.info(f"[WS]        -- Extracted fields saved: {classification_result.get('extracted_fields', {})}")
-            except Exception as e:
-                ctx.log.warning(f"[WS]        -- Response classification failed: {e}")
-                classification_result = None
-        
-        # 6.6 분류 실패 시 현재 단계에 맞게 간단히 데이터 저장
-        # (예: work_scope 단계면 사용자 입력 전체를 work_scope으로 저장)
-        if not confirmation_message_sent and state_manager.current_step != ChatStep.INTRODUCTION:
-            if not classification_result or not classification_result.get("extracted_fields"):
-                step_key_mapping = {
-                    ChatStep.WORK_SCOPE: "work_scope",
-                    ChatStep.WORK_PERIOD: "work_period",
-                    ChatStep.BUDGET: "budget",
-                    ChatStep.REVISIONS: "revision_count",
-                    ChatStep.COPYRIGHT: "copyright_owner",
-                    ChatStep.CONFIDENTIALITY: "confidentiality_terms",
-                }
-                step_key = step_key_mapping.get(state_manager.current_step)
-                if step_key and user_query.strip():
-                    state_manager.update_data(step_key, user_query.strip())
-                    ctx.log.info(f"[WS]        -- Auto-saved user input to collected_data[{step_key}]: {user_query[:50]}...")
 
-        
         # 7. LLM에 전달할 프롬프트 구성
         
         # 역할 한글 변환
@@ -770,7 +808,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         try:
             rag_manager = RAGManager()
             # 검색 쿼리 구성: 현재 단계 키워드 + 사용자 입력
-            search_query = f"{state_manager.current_step.value} {user_query}"
+            search_query = f"{state_manager.current_step.value} {effective_user_query}"
             rag_context = rag_manager.search(search_query, k=2)
             if rag_context:
                 ctx.log.info(f"[WS]        -- RAG context retrieved: {len(rag_context)} chars")
@@ -858,7 +896,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             # clarification 요청 내용을 프롬프트에 추가
             response_placeholders = {
                 **common_placeholders,
-                "user_query": classification_result.get("clarification_needed", user_query),
+                "user_query": classification_result.get("clarification_needed", effective_user_query),
             }
             
             response_text = await manager.generate(
@@ -888,7 +926,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             # 정상 응답용 추가 placeholders
             response_placeholders = {
                 **common_placeholders,
-                "user_query": user_query,
+                "user_query": effective_user_query,
             }
             
             # 8. LLM 호출
@@ -999,7 +1037,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         )
         
         ctx.log.info(f"[WS]        -- LLM response sent (step: {state_manager.current_step.value}, status: {'ERROR' if is_error_response else 'OK'})")
-        await websocket.send_json(response)
+        await send_json_safe(response)
         
         # 10. 상태 저장
         await SessionStateCache.save(state_manager, ctx)
@@ -1009,7 +1047,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         error_user_name = hd.get("user_name") or hd.get("asker") or "사용자"
         error_role = hd.get("role") or "client"
         error_contract_date = hd.get("contract_date")
-        await websocket.send_json({
+        await send_json_safe({
             "hd": {
                 "sid": sid, 
                 "event": ChatEvent.LLM_ERROR.value, 
