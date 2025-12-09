@@ -219,14 +219,18 @@ class LLMManager:
         # JSON 파싱
         try:
             # 응답에서 JSON 블록 추출 (```json ... ``` 형식일 수 있음)
-            json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
+            json_match = re.search(r'```(?:json)?\s*(.*?)\s*```', response_text, re.DOTALL)
             if json_match:
                 json_str = json_match.group(1)
             else:
                 # 직접 JSON인 경우
                 json_str = response_text
             
-            classification_result = orjson.loads(json_str)
+            try:
+                classification_result = orjson.loads(json_str)
+            except Exception:
+                classification_result = json.loads(json_str, strict=False)
+
             self.ctx.log.debug(f"[LLM] Response classification result: {classification_result}")
             return classification_result
             

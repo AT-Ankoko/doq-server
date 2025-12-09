@@ -12,7 +12,9 @@ from src.service.ai.rag_manager import RAGManager
 
 import src.common.common_codes as codes
 import orjson
+import json
 import re
+from langchain_core.output_parsers import JsonOutputParser
 
 router = APIRouter(prefix="/v1/session", tags=["Session"])
 
@@ -822,24 +824,42 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         user_message = response_text or ""
         contract_draft = None
 
-        # 1차: 마크다운 코드블록 제거 후 JSON 파싱 ```json {...} ```
+        # 1차: LangChain JsonOutputParser 시도 (가장 강력함)
         try:
-            txt = (response_text or "").strip()
-            # 마크다운 코드블록 제거
-            json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", txt, re.DOTALL)
-            if json_match:
-                txt = json_match.group(1)
+            parser = JsonOutputParser()
+            # LangChain 파서는 마크다운 제거 및 부분 JSON 파싱 등을 지원
+            parsed = parser.parse(response_text)
+            if isinstance(parsed, dict):
+                if "USER_MESSAGE" in parsed:
+                    user_message = str(parsed.get("USER_MESSAGE") or "").strip()
+                if "CONTRACT_DRAFT" in parsed:
+                    contract_draft = str(parsed.get("CONTRACT_DRAFT") or "").strip()
+        except Exception as e_lc:
+            # LangChain 파싱 실패 시, 기존 수동 로직으로 Fallback (strict=False 등 지원)
+            ctx.log.debug(f"[WS]        -- LangChain parser failed, trying manual fallback: {e_lc}")
             
-            # 이제 JSON 파싱 시도
-            if txt.startswith("{"):
-                parsed = orjson.loads(txt)
-                if isinstance(parsed, dict):
-                    if "USER_MESSAGE" in parsed:
-                        user_message = str(parsed.get("USER_MESSAGE") or "").strip()
-                    if "CONTRACT_DRAFT" in parsed:
-                        contract_draft = str(parsed.get("CONTRACT_DRAFT") or "").strip()
-        except Exception as e:
-            ctx.log.warning(f"[WS]        -- Failed to parse JSON response: {e}")
+            try:
+                txt = (response_text or "").strip()
+                # 마크다운 코드블록 제거 (내용 전체 캡처)
+                json_match = re.search(r"```(?:json)?\s*(.*?)```", txt, re.DOTALL)
+                if json_match:
+                    txt = json_match.group(1).strip()
+                
+                # 이제 JSON 파싱 시도
+                if txt.startswith("{"):
+                    try:
+                        parsed = orjson.loads(txt)
+                    except Exception:
+                        # orjson 실패 시 표준 json 라이브러리로 재시도 (strict=False 허용)
+                        parsed = json.loads(txt, strict=False)
+
+                    if isinstance(parsed, dict):
+                        if "USER_MESSAGE" in parsed:
+                            user_message = str(parsed.get("USER_MESSAGE") or "").strip()
+                        if "CONTRACT_DRAFT" in parsed:
+                            contract_draft = str(parsed.get("CONTRACT_DRAFT") or "").strip()
+            except Exception as e:
+                ctx.log.warning(f"[WS]        -- Failed to parse JSON response: {e}. Text: {txt[:200]}...")
 
         # 2차: 프롬프트에서 안내한 섹션 형식 USER_MESSAGE: ... CONTRACT_DRAFT: ...
         if contract_draft is None:
