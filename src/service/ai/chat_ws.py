@@ -513,16 +513,24 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             ctx.log.info(f"[WS]        -- Step advance override by keyword pattern: {effective_user_query}")
 
         # 추가 확정 키워드 간단 매칭 (패턴에 없을 때 대비)
+        # [중요] 양측 발화 확인: 최근 대화에 client와 provider 모두 있는지 체크
         if not should_advance:
+            # 최근 10개 대화에서 client와 provider 발화 확인
+            has_client = any("client" in line or "의뢰인" in line for line in chat_history[-10:])
+            has_provider = any("provider" in line or "용역자" in line for line in chat_history[-10:])
+            both_participated = has_client and has_provider
+            
             confirm_keywords = ["알겠습니다", "동의", "합의", "진행하겠습니다", "괜찮습니다", "좋습니다", "승낙", "확정"]
-            if any(kw in effective_user_query for kw in confirm_keywords):
+            if any(kw in effective_user_query for kw in confirm_keywords) and both_participated:
                 should_advance = True
                 step_advance_meta = {
                     "advance": True,
-                    "reason": f"간단 확정 키워드 매칭: {effective_user_query[:30]}",
+                    "reason": f"간단 확정 키워드 매칭 (양측 참여 확인됨): {effective_user_query[:30]}",
                     "source": "keyword_simple"
                 }
-                ctx.log.info(f"[WS]        -- Step advance override by simple keyword: {effective_user_query}")
+                ctx.log.info(f"[WS]        -- Step advance override by simple keyword (both participated): {effective_user_query}")
+            elif any(kw in effective_user_query for kw in confirm_keywords) and not both_participated:
+                ctx.log.info(f"[WS]        -- Keyword detected but only one side participated, waiting for other side")
 
         # 분류 결과가 단계 완료로 판단된 경우에도 진행 플래그 설정
         if not should_advance and classification_result and classification_result.get("is_complete"):
