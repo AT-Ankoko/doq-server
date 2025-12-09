@@ -191,6 +191,12 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             if hd.get("contract_date"):
                 state_manager.user_info["contract_date"] = hd.get("contract_date")
         
+        # [Fix] collected_data에 참여자 이름 정보 동기화
+        if client_name_fixed and client_name_fixed != "의뢰인":
+            state_manager.collected_data["client_name"] = client_name_fixed
+        if provider_name_fixed and provider_name_fixed != "용역자":
+            state_manager.collected_data["provider_name"] = provider_name_fixed
+
         # 3. 사용자 입력 기록
         role = state_manager.user_info.get("role", "client")
         state_manager.add_role_input(role, user_query)
@@ -502,9 +508,49 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             else:
                 # 다른 단계에서의 입력 저장 (현재 단계 필드에)
                 current_field = current_step_to_field_mapping.get(state_manager.current_step)
-                if current_field and user_query.strip() and state_manager.collected_data.get(current_field) is None:
-                    state_manager.update_data(current_field, user_query.strip())
-                    ctx.log.info(f"[WS]        -- Auto-saved user input from {state_manager.current_step.value} to {current_field}: {user_query[:50]}...")
+                
+                # [NEW] LLM을 이용한 단계별 최종 합의 내용 요약 및 저장
+                if current_field:
+                    try:
+                        summary_prompt = scenario.STEP_SUMMARY_PROMPT
+                        summary_text = await manager.generate(
+                            summary_prompt,
+                            placeholders={
+                                "conversation_context": conversation_context,
+                                "current_step": state_manager.current_step.value,
+                                "target_field": current_field
+                            },
+                            max_output_tokens=500,
+                            temperature=0.1
+                        )
+                        
+                        # JSON 파싱
+                        summary_json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", summary_text, re.DOTALL)
+                        if summary_json_match:
+                            summary_json_str = summary_json_match.group(1)
+                        else:
+                            summary_json_str = summary_text
+                            
+                        try:
+                            summary_parsed = orjson.loads(summary_json_str)
+                        except:
+                            summary_parsed = json.loads(summary_json_str, strict=False)
+                            
+                        extracted_value = summary_parsed.get("extracted_value")
+                        if extracted_value:
+                            state_manager.update_data(current_field, extracted_value)
+                            ctx.log.info(f"[WS]        -- Summarized and saved {current_field}: {extracted_value}")
+                        else:
+                            # 요약 실패 시 기존 방식(마지막 입력) 폴백
+                            if user_query.strip() and state_manager.collected_data.get(current_field) is None:
+                                state_manager.update_data(current_field, user_query.strip())
+                                ctx.log.info(f"[WS]        -- Summary failed, fallback to user input for {current_field}")
+
+                    except Exception as e:
+                        ctx.log.warning(f"[WS]        -- Step summary failed: {e}")
+                        # 예외 발생 시 기존 방식 폴백
+                        if user_query.strip() and state_manager.collected_data.get(current_field) is None:
+                            state_manager.update_data(current_field, user_query.strip())
             
             next_step = state_manager.move_to_next_step()
 
@@ -731,14 +777,60 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         except Exception as e:
             ctx.log.warning(f"[WS]        -- RAG search failed: {e}")
 
+        # 카테고리(계약명) 정규화: 작업 범위를 그대로 쓰지 않고 문장형 표현을 정리
+        def _normalize_category(text: str) -> str:
+            if not text:
+                return "용역"
+            candidate = re.split(r"(을 의뢰|를 의뢰|을 의뢰하고|를 의뢰하고|을 의뢰할|를 의뢰할)", text)[0]
+            candidate = re.sub(r"[^0-9A-Za-z가-힣·\s]", " ", candidate)
+            candidate = re.sub(r"\s+", " ", candidate).strip()
+            return candidate if candidate else "용역"
+
+        # 핵심 식별자/카테고리 기본값 보정 (이름이 없으면 템플릿이 '미기재'로 채워지는 문제 방지)
+        resolved_client_name = state_manager.collected_data.get("client_name") or client_name_fixed or "미기재"
+        resolved_provider_name = state_manager.collected_data.get("provider_name") or provider_name_fixed or "미기재"
+        resolved_client_company = state_manager.collected_data.get("client_company") or resolved_client_name
+        resolved_provider_company = state_manager.collected_data.get("provider_company") or resolved_provider_name
+        resolved_category = state_manager.collected_data.get("category") or _normalize_category(
+            state_manager.collected_data.get("work_scope") or ""
+        )
+
+        # 수집 데이터에 기본값을 반영 (없을 때만 세팅)
+        if not state_manager.collected_data.get("client_name"):
+            state_manager.update_data("client_name", resolved_client_name)
+        if not state_manager.collected_data.get("provider_name"):
+            state_manager.update_data("provider_name", resolved_provider_name)
+        if not state_manager.collected_data.get("client_company"):
+            state_manager.update_data("client_company", resolved_client_company)
+        if not state_manager.collected_data.get("provider_company"):
+            state_manager.update_data("provider_company", resolved_provider_company)
+        if not state_manager.collected_data.get("category"):
+            state_manager.update_data("category", resolved_category)
+
         # [수정] 항상 전체 템플릿을 제공하여 계약서 전문 생성을 유도
         template_to_use = CONTRACT_TEMPLATE
+        
+        # [Fix] 템플릿 내의 기본 정보(이름, 회사, 카테고리 등)를 미리 치환하여 LLM에 제공
+        template_placeholders = {
+            "client_name": resolved_client_name,
+            "provider_name": resolved_provider_name,
+            "client_company": resolved_client_company,
+            "provider_company": resolved_provider_company,
+            "category": resolved_category,
+            "work_period": state_manager.collected_data.get("work_period") or "미기재",
+            "start_date": state_manager.collected_data.get("start_date") or "미기재",
+            "end_date": state_manager.collected_data.get("end_date") or "미기재",
+            "budget": state_manager.collected_data.get("budget") or "미기재",
+        }
+        for k, v in template_placeholders.items():
+            template_to_use = template_to_use.replace(f"{{{{{k}}}}}", str(v))
+
         # if previous_contract_draft and len(previous_contract_draft) > 50:
         #     template_to_use = "아래 '계약서 초안'만 기준으로 수정 및 보완하세요. 전체 템플릿은 생략됨."
 
         common_placeholders = {
-            "client_name": client_name_fixed,
-            "provider_name": provider_name_fixed,
+            "client_name": resolved_client_name,
+            "provider_name": resolved_provider_name,
             "user_name": state_manager.user_info.get("user_name") or asker or "사용자",
             "role": state_manager.user_info.get("role") or hd.get("role") or "client",
             "role_korean": role_korean,
