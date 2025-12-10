@@ -24,7 +24,7 @@
       "port": 17393,
       "db": 0,
       "password": "PuG8gMbtUZRtNysAQCpYeye0x8weI6Gd",
-      "ssl": true 
+      "ssl": false 
     },
 
     "redis_consumer": {
