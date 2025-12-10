@@ -625,14 +625,27 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 ctx.log.info(f"[WS]        -- Consent keyword detected but only one side participated, waiting for counterpart")
 
         # 분류 결과가 단계 완료로 판단된 경우에도 진행 플래그 설정
+        # 단, 양측 합의가 필요한 단계에서는 양측 참여 여부를 확인해야 함
         if not should_advance and classification_result and classification_result.get("is_complete"):
-            should_advance = True
-            step_advance_meta = {
-                "advance": True,
-                "reason": "응답 분류에서 완료로 판단",
-                "source": "classification"
-            }
-            ctx.log.info("[WS]        -- Step advance by classification is_complete flag")
+            # 양측 합의가 필수적인 단계인지 확인 (예: 예산, 기간 등)
+            steps_requiring_agreement = [ChatStep.WORK_SCOPE, ChatStep.WORK_PERIOD, ChatStep.BUDGET, ChatStep.REVISIONS]
+            
+            if state_manager.current_step in steps_requiring_agreement:
+                # [Strict] 합의가 필요한 단계에서는 단순 데이터 추출(is_complete)만으로 진행하지 않음
+                # 반드시 STEP_ADVANCE_CLASSIFICATION_PROMPT의 'advance: true' 또는 명시적 합의 키워드가 있어야 함
+                ctx.log.info(f"[WS]        -- Step {state_manager.current_step.value} requires strict agreement. Ignoring classification.is_complete.")
+                # should_advance = False (기본값 유지)
+            else:
+                # 합의가 덜 중요한 단계거나 초기 단계는 분류 결과 신뢰
+                should_advance = True
+                step_advance_meta = {
+                    "advance": True,
+                    "reason": "응답 분류에서 완료로 판단",
+                    "source": "classification"
+                }
+            
+            if should_advance:
+                ctx.log.info("[WS]        -- Step advance by classification is_complete flag")
 
         # 추가 폴백: 소개 단계에서 사용자가 의미 있는 입력을 하면 진행
         if not should_advance and state_manager.current_step == ChatStep.INTRODUCTION and user_query.strip():
