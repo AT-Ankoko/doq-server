@@ -16,14 +16,15 @@
     
     "llm": {
       "provider": "gemini",
-      "model": "gemini-2.0-flash-lite"
+      "model": "gemini-2.0-flash"
     },
     
     "redis": {
-      "host": "localhost",
-      "port": 6379,
+      "host": "redis-17393.c274.us-east-1-3.ec2.cloud.redislabs.com:17393",
+      "port": 17393,
       "db": 0,
-      "password": null
+      "password": "PuG8gMbtUZRtNysAQCpYeye0x8weI6Gd",
+      "ssl": true 
     },
 
     "redis_consumer": {
@@ -42,4 +43,3 @@
         "use_console": true
     }  
 }
-  

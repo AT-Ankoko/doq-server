@@ -26,7 +26,9 @@ class RedisHandler:
                 port=self.cfg.port,
                 db=self.cfg.db,
                 password=self.cfg.password,
-                decode_responses=True
+                decode_responses=True,
+                ssl=self.cfg.ssl,
+                ssl_cert_reqs=None
             )
 
             if await self.client.ping():

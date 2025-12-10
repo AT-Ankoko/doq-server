@@ -41,6 +41,7 @@ class RedisConfig(BaseModel):
     port: Optional[int]
     db: Optional[int]
     password: Optional[str] = None
+    ssl: Optional[bool] = False
 
 class RedisConsumerConfig(BaseModel):
     stream_key: Optional[str]
