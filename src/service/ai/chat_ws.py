@@ -579,15 +579,15 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             }
 
         # [Relaxation] LLM이 False라고 했더라도, 사용자가 명확한 진행 키워드를 사용했다면 진행 (상태 변경 없이 플래그만 True)
-        # 실제 상태 변경은 아래 if should_advance: 블록에서 move_to_next_step() 호출로 처리됨
+        # _CONFIRM_PATTERNS가 엄격하게 수정되었으므로(예: "다음 단계", "넘어가"), 모든 단계에서 적용 가능
         if not should_advance and state_manager.check_confirm_pattern(effective_user_query):
             should_advance = True
             step_advance_meta = {
                 "advance": True,
-                "reason": f"키워드 패턴 매칭: {effective_user_query[:30]}",
+                "reason": f"진행 의사 패턴 매칭: {effective_user_query[:30]}",
                 "source": "keyword_override"
             }
-            ctx.log.info(f"[WS]        -- Step advance override by keyword pattern: {effective_user_query}")
+            ctx.log.info(f"[WS]        -- Step advance override by explicit keyword pattern: {effective_user_query}")
 
         # [강화] 양측 합의 확인 로직: 키워드 + 양측 발화 + 순차적 동의 패턴 체크
         if not should_advance:
@@ -608,7 +608,9 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 # 이전: client 제안, 현재: provider 수락 or 이전: provider 제안, 현재: client 수락
                 if ("client" in prev_line and "provider" in curr_line) or ("provider" in prev_line and "client" in curr_line):
                     if any(kw in curr_line for kw in CONFIRM_KEYWORDS):
-                        sequential_agreement = True
+                        # [Safety] 제안 키워드가 함께 있으면 동의가 아닌 역제안으로 간주
+                        if not any(kw in curr_line for kw in PROPOSAL_KEYWORDS):
+                            sequential_agreement = True
             
             # 진행 조건: 양측 참여 + (확정 키워드 or 순차적 동의)
             if both_participated and (has_confirm_keyword or sequential_agreement):
@@ -628,7 +630,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         # 단, 양측 합의가 필요한 단계에서는 양측 참여 여부를 확인해야 함
         if not should_advance and classification_result and classification_result.get("is_complete"):
             # 양측 합의가 필수적인 단계인지 확인 (예: 예산, 기간 등)
-            steps_requiring_agreement = [ChatStep.WORK_SCOPE, ChatStep.WORK_PERIOD, ChatStep.BUDGET, ChatStep.REVISIONS]
+            steps_requiring_agreement = [ChatStep.WORK_SCOPE, ChatStep.WORK_PERIOD, ChatStep.BUDGET, ChatStep.REVISIONS, ChatStep.FINALIZATION]
             
             if state_manager.current_step in steps_requiring_agreement:
                 # [Strict] 합의가 필요한 단계에서는 단순 데이터 추출(is_complete)만으로 진행하지 않음
