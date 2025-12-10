@@ -20,7 +20,7 @@
     },
     
     "redis": {
-      "host": "redis-17393.c274.us-east-1-3.ec2.cloud.redislabs.com:17393",
+      "host": "redis-17393.c274.us-east-1-3.ec2.cloud.redislabs.com",
       "port": 17393,
       "db": 0,
       "password": "PuG8gMbtUZRtNysAQCpYeye0x8weI6Gd",
