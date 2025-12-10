@@ -915,23 +915,14 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         except Exception as e:
             ctx.log.warning(f"[WS]        -- RAG search failed: {e}")
 
-        # 카테고리(계약명) 정규화: 작업 범위를 그대로 쓰지 않고 문장형 표현을 정리
-        def _normalize_category(text: str) -> str:
-            if not text:
-                return "용역"
-            candidate = re.split(r"(을 의뢰|를 의뢰|을 의뢰하고|를 의뢰하고|을 의뢰할|를 의뢰할)", text)[0]
-            candidate = re.sub(r"[^0-9A-Za-z가-힣·\s]", " ", candidate)
-            candidate = re.sub(r"\s+", " ", candidate).strip()
-            return candidate if candidate else "용역"
-
         # 핵심 식별자/카테고리 기본값 보정 (이름이 없으면 템플릿이 '미기재'로 채워지는 문제 방지)
         resolved_client_name = state_manager.collected_data.get("client_name") or client_name_fixed or "미기재"
         resolved_provider_name = state_manager.collected_data.get("provider_name") or provider_name_fixed or "미기재"
         resolved_client_company = state_manager.collected_data.get("client_company") or resolved_client_name
         resolved_provider_company = state_manager.collected_data.get("provider_company") or resolved_provider_name
-        resolved_category = state_manager.collected_data.get("category") or _normalize_category(
-            state_manager.collected_data.get("work_scope") or ""
-        )
+        # [Modified] 카테고리 정규화 로직 제거 -> LLM이 생성 시점에 처리하도록 유도
+        # work_scope가 문장형이어도 그대로 전달
+        resolved_category = state_manager.collected_data.get("category") or state_manager.collected_data.get("work_scope") or "용역"
 
         # 수집 데이터에 기본값을 반영 (없을 때만 세팅)
         if not state_manager.collected_data.get("client_name"):
