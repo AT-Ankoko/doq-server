@@ -30,77 +30,131 @@ async def websocket_chat(websocket: WebSocket):
         return
 
     # sid 전달하여 로그용 식별자 사용
+    is_first_connection = len(ctx.ws_handler.session_map.get(sid, [])) == 0
     await ctx.ws_handler.connect(websocket, id=sid)
 
-    # 연결 직후 선제 인사 전송 (1회)
-    try:
-        # Redis에서 세션 정보 로드
-        session_key = f"session:info:{sid}"
-        session_info_json = None
-        client_name = "의뢰인"
-        provider_name = "용역자"
-        contract_date = None
-        
+    # 연결 직후 선제 인사 전송 (최초 연결 시에만)
+    if is_first_connection:
         try:
-            redis_client = ctx.redis_handler.get_client()
-            session_info_json = await redis_client.get(session_key)
-            if session_info_json:
-                session_info = orjson.loads(session_info_json)
-                client_name = session_info.get("client_name") or "의뢰인"
-                provider_name = session_info.get("provider_name") or "용역자"
-                contract_date = session_info.get("contract_date")
-            else:
-                # Redis에 없으면 쿼리 파라미터에서 읽어서 Redis에 저장 (최초 1회)
+            # Redis에서 세션 정보 로드
+            session_key = f"session:info:{sid}"
+            session_info_json = None
+            client_name = "의뢰인"
+            provider_name = "용역자"
+            contract_date = None
+            
+            try:
+                redis_client = ctx.redis_handler.get_client()
+                session_info_json = await redis_client.get(session_key)
+                if session_info_json:
+                    session_info = orjson.loads(session_info_json)
+                    client_name = session_info.get("client_name") or "의뢰인"
+                    provider_name = session_info.get("provider_name") or "용역자"
+                    contract_date = session_info.get("contract_date")
+                else:
+                    # Redis에 없으면 쿼리 파라미터에서 읽어서 Redis에 저장 (최초 1회)
+                    client_name = websocket.query_params.get("client_name") or "의뢰인"
+                    provider_name = websocket.query_params.get("provider_name") or "용역자"
+                    contract_date = websocket.query_params.get("contract_date")
+                    
+                    # Redis에 저장
+                    new_info = {
+                        "client_name": client_name,
+                        "provider_name": provider_name,
+                        "contract_date": contract_date
+                    }
+                    await redis_client.set(session_key, orjson.dumps(new_info))
+
+            except Exception as e:
+                ctx.log.warning(f"[WS]        -- Failed to load session info from Redis: {e}")
+                # 폴백: 쿼리 파라미터에서 읽기
                 client_name = websocket.query_params.get("client_name") or "의뢰인"
                 provider_name = websocket.query_params.get("provider_name") or "용역자"
                 contract_date = websocket.query_params.get("contract_date")
-                
-                # Redis에 저장
-                new_info = {
-                    "client_name": client_name,
-                    "provider_name": provider_name,
-                    "contract_date": contract_date
-                }
-                await redis_client.set(session_key, orjson.dumps(new_info))
 
+            # START_MESSAGE_PROMPT 렌더링 (간단 치환)
+            greeting_text = scenario.START_MESSAGE_PROMPT
+            greeting_text = greeting_text.replace("{{client_name}}", client_name)
+            greeting_text = greeting_text.replace("{{service_provider_name}}", provider_name)
+
+            greeting_response = {
+                "hd": {
+                    "sid": sid,
+                    "event": ChatEvent.LLM_RESPONSE.value,
+                    "role": "assistant",
+                    "asker": None,
+                    "step": ChatStep.INTRODUCTION.value,
+                    "user_name": client_name,
+                    "role_name": "client",
+                    "contract_date": contract_date,
+                },
+                "bd": {
+                    "text": greeting_text,
+                    "contract_draft": None,
+                    "state": codes.ResponseStatus.SUCCESS,
+                },
+            }
+            await store_chat_message(
+                ctx,
+                sid,
+                "assistant",
+                {"hd": greeting_response["hd"], "bd": greeting_response["bd"], "sid": sid},
+            )
+            # 초기 인사 메시지를 세션의 모든 클라이언트에게 브로드캐스트
+            await ctx.ws_handler.broadcast_to_session(sid, greeting_response)
         except Exception as e:
-            ctx.log.warning(f"[WS]        -- Failed to load session info from Redis: {e}")
-            # 폴백: 쿼리 파라미터에서 읽기
-            client_name = websocket.query_params.get("client_name") or "의뢰인"
-            provider_name = websocket.query_params.get("provider_name") or "용역자"
-            contract_date = websocket.query_params.get("contract_date")
-
-        # START_MESSAGE_PROMPT 렌더링 (간단 치환)
-        greeting_text = scenario.START_MESSAGE_PROMPT
-        greeting_text = greeting_text.replace("{{client_name}}", client_name)
-        greeting_text = greeting_text.replace("{{service_provider_name}}", provider_name)
-
-        greeting_response = {
-            "hd": {
-                "sid": sid,
-                "event": ChatEvent.LLM_RESPONSE.value,
-                "role": "assistant",
-                "asker": None,
-                "step": ChatStep.INTRODUCTION.value,
-                "user_name": client_name,
-                "role_name": "client",
-                "contract_date": contract_date,
-            },
-            "bd": {
-                "text": greeting_text,
-                "contract_draft": None,
-                "state": codes.ResponseStatus.SUCCESS,
-            },
-        }
-        await store_chat_message(
-            ctx,
-            sid,
-            "assistant",
-            {"hd": greeting_response["hd"], "bd": greeting_response["bd"], "sid": sid},
-        )
-        await websocket.send_json(greeting_response)
-    except Exception as e:
-        ctx.log.warning(f"[WS]        -- Failed to send initial greeting: {e}")
+            ctx.log.warning(f"[WS]        -- Failed to send initial greeting: {e}")
+    else:
+        # 후속 접속 시: Redis에서 채팅 히스토리 로드 및 전송
+        try:
+            redis_client = ctx.redis_handler.get_client()
+            stream_key = f"session:chat:{sid}"
+            messages = await redis_client.xrange(stream_key, count=50)  # 최근 50개
+            
+            ctx.log.info(f"[WS]        -- Loading chat history for late-joined user: {len(messages)} messages")
+            
+            for msg_id, fields in messages:
+                try:
+                    if not isinstance(fields, dict):
+                        continue
+                    
+                    body_json = fields.get("body", "{}")
+                    participant = fields.get("participant", "user")
+                    
+                    if isinstance(body_json, str):
+                        body_data = orjson.loads(body_json)
+                    else:
+                        body_data = body_json
+                    
+                    # 히스토리 메시지 구성
+                    history_msg = {
+                        "hd": body_data.get("hd", {
+                            "sid": sid,
+                            "event": ChatEvent.CHAT_MESSAGE.value,
+                            "role": participant,
+                        }),
+                        "bd": body_data.get("bd", {"text": "", "state": codes.ResponseStatus.SUCCESS})
+                    }
+                    
+                    # 헤더 보충
+                    if "sid" not in history_msg["hd"]:
+                        history_msg["hd"]["sid"] = sid
+                    if "event" not in history_msg["hd"]:
+                        history_msg["hd"]["event"] = ChatEvent.CHAT_MESSAGE.value
+                    if "role" not in history_msg["hd"]:
+                        history_msg["hd"]["role"] = participant
+                    
+                    # 새로 접속한 클라이언트에게만 히스토리 전송
+                    await websocket.send_json(history_msg)
+                    
+                except Exception as hist_err:
+                    ctx.log.warning(f"[WS]        -- Failed to send history message: {hist_err}")
+                    continue
+            
+            ctx.log.info(f"[WS]        -- Chat history loaded and sent to late-joined user")
+            
+        except Exception as e:
+            ctx.log.warning(f"[WS]        -- Failed to load chat history: {e}")
 
     await ctx.ws_handler.receive_and_respond(websocket, processor=processor)
 
@@ -115,9 +169,10 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
 
         async def send_json_safe(payload):
             try:
-                await websocket.send_json(payload)
+                # 같은 세션의 모든 클라이언트에게 브로드캐스트
+                await ctx.ws_handler.broadcast_to_session(sid, payload)
             except Exception as send_err:
-                ctx.log.warning(f"[WS]        -- Skipped send after close: {send_err}")
+                ctx.log.warning(f"[WS]        -- Broadcast failed: {send_err}")
                 return
         
         ctx.log.info(f"[WS]        -- LLM invocation (asker={asker}) in session {sid}")
@@ -209,11 +264,33 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         state_manager.add_role_input(role, user_query)
         
         # 3.5. 사용자 입력을 Redis 스트림에 저장 (participant에 역할 포함)
+        user_message_data = {
+            "hd": {"sid": sid, "event": ChatEvent.CHAT_MESSAGE.value, "role": role}, 
+            "bd": {"text": user_query}
+        }
         await store_chat_message(
             ctx, sid, role,  # "client" 또는 "provider"로 저장
-            {"hd": {"sid": sid, "event": ChatEvent.CHAT_MESSAGE.value, "role": role}, 
-             "bd": {"text": user_query}}
+            user_message_data
         )
+        
+        # 사용자 메시지를 세션의 다른 클라이언트에게 브로드캐스트 (발신자는 이미 수신했음)
+        user_message_broadcast = {
+            "hd": {
+                "sid": sid,
+                "event": ChatEvent.CHAT_MESSAGE.value,
+                "role": role,
+                "asker": role,
+                "user_name": state_manager.user_info.get("user_name") or role,
+                "role_name": state_manager.user_info.get("role"),
+                "contract_date": state_manager.user_info.get("contract_date"),
+            },
+            "bd": {
+                "text": user_query,
+                "state": codes.ResponseStatus.SUCCESS
+            }
+        }
+        # 발신자(websocket)를 제외하고 다른 세션 참여자들에게만 전송
+        await ctx.ws_handler.broadcast_to_session(sid, user_message_broadcast, exclude_sender=websocket)
         
         # 4. 대화 이력 가져오기 (Redis에서)
         chat_history = []
