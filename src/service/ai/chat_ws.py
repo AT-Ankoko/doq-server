@@ -14,6 +14,7 @@ import src.common.common_codes as codes
 import orjson
 import json
 import re
+from datetime import datetime
 from langchain_core.output_parsers import JsonOutputParser
 
 router = APIRouter(prefix="/v1/session", tags=["Session"])
@@ -453,7 +454,8 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                     "current_step": state_manager.current_step.value,
                     "user_response": user_query,
                     "user_name": state_manager.user_info.get("user_name") or asker,
-                    "role": role
+                    "role": role,
+                    "current_date": datetime.now().strftime("%Y-%m-%d")
                 }
                 classification_result = await manager.classify_response(
                     user_response=user_query,
@@ -519,6 +521,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                     "current_step": state_manager.current_step.value,
                     "current_step_prompt": current_step_prompt,
                     "user_query": effective_user_query,
+                    "current_date": datetime.now().strftime("%Y-%m-%d")
                 },
                 max_output_tokens=800,
                 temperature=0.0
@@ -718,7 +721,8 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                             placeholders={
                                 "conversation_context": conversation_context,
                                 "current_step": state_manager.current_step.value,
-                                "target_field": current_field
+                                "target_field": current_field,
+                                "current_date": datetime.now().strftime("%Y-%m-%d")
                             },
                             max_output_tokens=500,
                             temperature=0.1
@@ -979,6 +983,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             "role": state_manager.user_info.get("role") or hd.get("role") or "client",
             "role_korean": role_korean,
             "contract_date": state_manager.user_info.get("contract_date") or hd.get("contract_date") or "",
+            "current_date": datetime.now().strftime("%Y-%m-%d"),
             "current_step": state_manager.current_step.value,
             "previous_step": previous_step_value,
             "step_guide": current_step_prompt,

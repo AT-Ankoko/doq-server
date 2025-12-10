@@ -153,6 +153,7 @@ RESPONSE_CLASSIFICATION_PROMPT = """
 
 NORMAL_RESPONSE_PROMPT_TEMPLATE = """{system_prompt}
 
+현재 날짜: {{current_date}}
 현재 단계: {{current_step}}  
 단계별 가이드: {{step_guide}}
 
@@ -221,6 +222,7 @@ NORMAL_RESPONSE_PROMPT_TEMPLATE = """{system_prompt}
 
 STEP_TRANSITION_PROMPT_TEMPLATE = """{system_prompt}
 
+현재 날짜: {{current_date}}
 이전 단계: {{previous_step}} - {{previous_step_guide}}
 현재 단계: {{current_step}} - {{step_guide}}
 
@@ -268,6 +270,7 @@ STEP_TRANSITION_PROMPT_TEMPLATE = """{system_prompt}
 STEP_ADVANCE_CLASSIFICATION_PROMPT = """
 아래는 client / provider / assistant 간의 대화 로그입니다.
 
+현재 날짜: {{current_date}}
 현재 단계: {{current_step}}  
 단계 가이드: {{current_step_prompt}}  
 최근 대화(최신순):  
@@ -344,6 +347,7 @@ DoQ를 이용해 주셔서 감사합니다!
 STEP_SUMMARY_PROMPT = """
 아래 대화 내용을 바탕으로 현재 단계({{current_step}})에서 최종적으로 합의된 내용을 요약하여 추출하세요.
 
+현재 날짜: {{current_date}}
 대화 기록:
 {{conversation_context}}
 
