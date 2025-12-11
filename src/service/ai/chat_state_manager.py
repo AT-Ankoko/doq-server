@@ -84,6 +84,26 @@ class ChatStateManager:
         # 타임스탬프
         self.created_at = datetime.now().isoformat()
         self.updated_at = datetime.now().isoformat()
+        
+        # 진행률
+        self.progress_percentage = 0.0
+        self._update_progress()
+        
+    def _update_progress(self):
+        """현재 단계에 따른 진행률 계산"""
+        try:
+            steps = list(ChatStep)
+            if not isinstance(self.current_step, ChatStep):
+                self.current_step = ChatStep(self.current_step)
+            
+            current_idx = steps.index(self.current_step)
+            # 마지막 단계(completed)는 100%
+            if self.current_step == ChatStep.COMPLETED:
+                self.progress_percentage = 100.0
+            else:
+                self.progress_percentage = round((current_idx / len(steps)) * 100, 1)
+        except Exception:
+            self.progress_percentage = 0.0
     
     def check_confirm_pattern(self, user_text: str) -> bool:
         """
@@ -120,6 +140,7 @@ class ChatStateManager:
             if not self.step_history or self.step_history[-1] != self.current_step:
                 self.step_history.append(self.current_step)
             self.updated_at = datetime.now().isoformat()
+            self._update_progress()
             return self.current_step
         return self.current_step
     
@@ -135,6 +156,7 @@ class ChatStateManager:
         if step not in self.step_history:
             self.step_history.append(step)
         self.updated_at = datetime.now().isoformat()
+        self._update_progress()
         return step
     
     def update_data(self, key: str, value: Any):
@@ -184,9 +206,7 @@ class ChatStateManager:
             "conflicts": self.conflicts,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
-            "progress_percentage": round(
-                (list(ChatStep).index(self.current_step) / len(ChatStep)) * 100, 1
-            )
+            "progress_percentage": self.progress_percentage
         }
     
     def to_dict(self) -> Dict[str, Any]:
@@ -228,6 +248,13 @@ class ChatStateManager:
         manager.conflicts = data.get("conflicts", [])
         manager.created_at = data.get("created_at", datetime.now().isoformat())
         manager.updated_at = data.get("updated_at", datetime.now().isoformat())
+        
+        # 진행률 복원
+        if "progress_percentage" in data:
+            manager.progress_percentage = data["progress_percentage"]
+        else:
+            manager._update_progress()
+            
         return manager
 
 
