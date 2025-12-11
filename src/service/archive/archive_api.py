@@ -22,7 +22,9 @@ async def list_archived_sessions(request: Request):
         for sid, data in sessions.items():
             summary_list.append({
                 "sid": sid,
-                "user_name": data.get("user_info", {}).get("user_name"),
+                "userId": data.get("user_info", {}).get("userId"),
+                "client_name": data.get("user_info", {}).get("client_name"),
+                "provider_name": data.get("user_info", {}).get("provider_name"),
                 "current_step": data.get("current_step"),
                 "updated_at": data.get("updated_at"),
                 "progress": data.get("progress_percentage")

@@ -14,6 +14,7 @@ import src.common.common_codes as codes
 import orjson
 import json
 import re
+from datetime import datetime
 from langchain_core.output_parsers import JsonOutputParser
 
 router = APIRouter(prefix="/v1/session", tags=["Session"])
@@ -30,77 +31,131 @@ async def websocket_chat(websocket: WebSocket):
         return
 
     # sid 전달하여 로그용 식별자 사용
+    is_first_connection = len(ctx.ws_handler.session_map.get(sid, [])) == 0
     await ctx.ws_handler.connect(websocket, id=sid)
 
-    # 연결 직후 선제 인사 전송 (1회)
-    try:
-        # Redis에서 세션 정보 로드
-        session_key = f"session:info:{sid}"
-        session_info_json = None
-        client_name = "의뢰인"
-        provider_name = "용역자"
-        contract_date = None
-        
+    # 연결 직후 선제 인사 전송 (최초 연결 시에만)
+    if is_first_connection:
         try:
-            redis_client = ctx.redis_handler.get_client()
-            session_info_json = await redis_client.get(session_key)
-            if session_info_json:
-                session_info = orjson.loads(session_info_json)
-                client_name = session_info.get("client_name") or "의뢰인"
-                provider_name = session_info.get("provider_name") or "용역자"
-                contract_date = session_info.get("contract_date")
-            else:
-                # Redis에 없으면 쿼리 파라미터에서 읽어서 Redis에 저장 (최초 1회)
+            # Redis에서 세션 정보 로드
+            session_key = f"session:info:{sid}"
+            session_info_json = None
+            client_name = "의뢰인"
+            provider_name = "용역자"
+            contract_date = None
+            
+            try:
+                redis_client = ctx.redis_handler.get_client()
+                session_info_json = await redis_client.get(session_key)
+                if session_info_json:
+                    session_info = orjson.loads(session_info_json)
+                    client_name = session_info.get("client_name") or "의뢰인"
+                    provider_name = session_info.get("provider_name") or "용역자"
+                    contract_date = session_info.get("contract_date")
+                else:
+                    # Redis에 없으면 쿼리 파라미터에서 읽어서 Redis에 저장 (최초 1회)
+                    client_name = websocket.query_params.get("client_name") or "의뢰인"
+                    provider_name = websocket.query_params.get("provider_name") or "용역자"
+                    contract_date = websocket.query_params.get("contract_date")
+                    
+                    # Redis에 저장
+                    new_info = {
+                        "client_name": client_name,
+                        "provider_name": provider_name,
+                        "contract_date": contract_date
+                    }
+                    await redis_client.set(session_key, orjson.dumps(new_info))
+
+            except Exception as e:
+                ctx.log.warning(f"[WS]        -- Failed to load session info from Redis: {e}")
+                # 폴백: 쿼리 파라미터에서 읽기
                 client_name = websocket.query_params.get("client_name") or "의뢰인"
                 provider_name = websocket.query_params.get("provider_name") or "용역자"
                 contract_date = websocket.query_params.get("contract_date")
-                
-                # Redis에 저장
-                new_info = {
-                    "client_name": client_name,
-                    "provider_name": provider_name,
-                    "contract_date": contract_date
-                }
-                await redis_client.set(session_key, orjson.dumps(new_info))
 
+            # START_MESSAGE_PROMPT 렌더링 (간단 치환)
+            greeting_text = scenario.START_MESSAGE_PROMPT
+            greeting_text = greeting_text.replace("{{client_name}}", client_name)
+            greeting_text = greeting_text.replace("{{service_provider_name}}", provider_name)
+
+            greeting_response = {
+                "hd": {
+                    "sid": sid,
+                    "event": ChatEvent.LLM_RESPONSE.value,
+                    "role": "assistant",
+                    "asker": None,
+                    "step": ChatStep.INTRODUCTION.value,
+                    "user_name": client_name,
+                    "role_name": "client",
+                    "contract_date": contract_date,
+                },
+                "bd": {
+                    "text": greeting_text,
+                    "contract_draft": None,
+                    "state": codes.ResponseStatus.SUCCESS,
+                },
+            }
+            await store_chat_message(
+                ctx,
+                sid,
+                "assistant",
+                {"hd": greeting_response["hd"], "bd": greeting_response["bd"], "sid": sid},
+            )
+            # 초기 인사 메시지를 세션의 모든 클라이언트에게 브로드캐스트
+            await ctx.ws_handler.broadcast_to_session(sid, greeting_response)
         except Exception as e:
-            ctx.log.warning(f"[WS]        -- Failed to load session info from Redis: {e}")
-            # 폴백: 쿼리 파라미터에서 읽기
-            client_name = websocket.query_params.get("client_name") or "의뢰인"
-            provider_name = websocket.query_params.get("provider_name") or "용역자"
-            contract_date = websocket.query_params.get("contract_date")
-
-        # START_MESSAGE_PROMPT 렌더링 (간단 치환)
-        greeting_text = scenario.START_MESSAGE_PROMPT
-        greeting_text = greeting_text.replace("{{client_name}}", client_name)
-        greeting_text = greeting_text.replace("{{service_provider_name}}", provider_name)
-
-        greeting_response = {
-            "hd": {
-                "sid": sid,
-                "event": ChatEvent.LLM_RESPONSE.value,
-                "role": "assistant",
-                "asker": None,
-                "step": ChatStep.INTRODUCTION.value,
-                "user_name": client_name,
-                "role_name": "client",
-                "contract_date": contract_date,
-            },
-            "bd": {
-                "text": greeting_text,
-                "contract_draft": None,
-                "state": codes.ResponseStatus.SUCCESS,
-            },
-        }
-        await store_chat_message(
-            ctx,
-            sid,
-            "assistant",
-            {"hd": greeting_response["hd"], "bd": greeting_response["bd"], "sid": sid},
-        )
-        await websocket.send_json(greeting_response)
-    except Exception as e:
-        ctx.log.warning(f"[WS]        -- Failed to send initial greeting: {e}")
+            ctx.log.warning(f"[WS]        -- Failed to send initial greeting: {e}")
+    else:
+        # 후속 접속 시: Redis에서 채팅 히스토리 로드 및 전송
+        try:
+            redis_client = ctx.redis_handler.get_client()
+            stream_key = f"session:chat:{sid}"
+            messages = await redis_client.xrange(stream_key, count=50)  # 최근 50개
+            
+            ctx.log.info(f"[WS]        -- Loading chat history for late-joined user: {len(messages)} messages")
+            
+            for msg_id, fields in messages:
+                try:
+                    if not isinstance(fields, dict):
+                        continue
+                    
+                    body_json = fields.get("body", "{}")
+                    participant = fields.get("participant", "user")
+                    
+                    if isinstance(body_json, str):
+                        body_data = orjson.loads(body_json)
+                    else:
+                        body_data = body_json
+                    
+                    # 히스토리 메시지 구성
+                    history_msg = {
+                        "hd": body_data.get("hd", {
+                            "sid": sid,
+                            "event": ChatEvent.CHAT_MESSAGE.value,
+                            "role": participant,
+                        }),
+                        "bd": body_data.get("bd", {"text": "", "state": codes.ResponseStatus.SUCCESS})
+                    }
+                    
+                    # 헤더 보충
+                    if "sid" not in history_msg["hd"]:
+                        history_msg["hd"]["sid"] = sid
+                    if "event" not in history_msg["hd"]:
+                        history_msg["hd"]["event"] = ChatEvent.CHAT_MESSAGE.value
+                    if "role" not in history_msg["hd"]:
+                        history_msg["hd"]["role"] = participant
+                    
+                    # 새로 접속한 클라이언트에게만 히스토리 전송
+                    await websocket.send_json(history_msg)
+                    
+                except Exception as hist_err:
+                    ctx.log.warning(f"[WS]        -- Failed to send history message: {hist_err}")
+                    continue
+            
+            ctx.log.info(f"[WS]        -- Chat history loaded and sent to late-joined user")
+            
+        except Exception as e:
+            ctx.log.warning(f"[WS]        -- Failed to load chat history: {e}")
 
     await ctx.ws_handler.receive_and_respond(websocket, processor=processor)
 
@@ -115,9 +170,10 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
 
         async def send_json_safe(payload):
             try:
-                await websocket.send_json(payload)
+                # 같은 세션의 모든 클라이언트에게 브로드캐스트
+                await ctx.ws_handler.broadcast_to_session(sid, payload)
             except Exception as send_err:
-                ctx.log.warning(f"[WS]        -- Skipped send after close: {send_err}")
+                ctx.log.warning(f"[WS]        -- Broadcast failed: {send_err}")
                 return
         
         ctx.log.info(f"[WS]        -- LLM invocation (asker={asker}) in session {sid}")
@@ -152,7 +208,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             
             await store_chat_message(
                 ctx, sid, "assistant", 
-                {"hd": response["hd"], "bd": response["bd"], "sid": sid}
+                {"hd": response["hd"], "bd": response["bd"]}
             )
             await send_json_safe(response)
             return
@@ -177,26 +233,26 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         state_manager = await SessionStateCache.get(sid, ctx)
         if not state_manager:
             user_info = {
-                "user_name": hd.get("user_name") or hd.get("asker"),
-                "role": hd.get("role"),
-                "contract_date": hd.get("contract_date"),
+                "userId": hd.get("userId"),
+                "client_name": client_name_fixed,
+                "provider_name": provider_name_fixed,
             }
             state_manager = ChatStateManager(sid, user_info)
             await SessionStateCache.save(state_manager, ctx)
 
         
             # 역할 한글 표현
-            role_korean = "의뢰인(갑)" if user_info.get('role') == 'client' else "용역자(을)"
-            ctx.log.info(f"[WS]        -- New session state created for {sid}, user: {user_info.get('user_name')} ({user_info.get('role')})")
+            role_korean = "의뢰인(갑)" if hd.get('role') == 'client' else "용역자(을)"
+            ctx.log.info(f"[WS]        -- New session state created for {sid}, user: {hd.get('user_name')} ({hd.get('role')})")
         else:
             ctx.log.debug(f"[WS]        -- Loaded session state for {sid}, current_step: {state_manager.current_step.value}")
             # 매 메시지마다 user_info 업데이트 (프론트에서 전송된 최신 정보로)
-            if hd.get("user_name"):
-                state_manager.user_info["user_name"] = hd.get("user_name")
-            if hd.get("role"):
-                state_manager.user_info["role"] = hd.get("role")
-            if hd.get("contract_date"):
-                state_manager.user_info["contract_date"] = hd.get("contract_date")
+            # if hd.get("user_name"):
+            #     state_manager.user_info["user_name"] = hd.get("user_name")
+            # if hd.get("role"):
+            #     state_manager.user_info["role"] = hd.get("role")
+            # if hd.get("contract_date"):
+            #     state_manager.user_info["contract_date"] = hd.get("contract_date")
         
         # [Fix] collected_data에 참여자 이름 정보 동기화
         if client_name_fixed and client_name_fixed != "의뢰인":
@@ -205,15 +261,37 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             state_manager.collected_data["provider_name"] = provider_name_fixed
 
         # 3. 사용자 입력 기록
-        role = state_manager.user_info.get("role", "client")
+        role = hd.get("role", "client")
         state_manager.add_role_input(role, user_query)
         
         # 3.5. 사용자 입력을 Redis 스트림에 저장 (participant에 역할 포함)
+        user_message_data = {
+            "hd": {"sid": sid, "event": ChatEvent.CHAT_MESSAGE.value, "role": role}, 
+            "bd": {"text": user_query}
+        }
         await store_chat_message(
             ctx, sid, role,  # "client" 또는 "provider"로 저장
-            {"hd": {"sid": sid, "event": ChatEvent.CHAT_MESSAGE.value, "role": role}, 
-             "bd": {"text": user_query}}
+            user_message_data
         )
+        
+        # 사용자 메시지를 세션의 다른 클라이언트에게 브로드캐스트 (발신자는 이미 수신했음)
+        user_message_broadcast = {
+            "hd": {
+                "sid": sid,
+                "event": ChatEvent.CHAT_MESSAGE.value,
+                "role": role,
+                "asker": role,
+                "user_name": state_manager.user_info.get("user_name") or role,
+                "role_name": state_manager.user_info.get("role"),
+                "contract_date": state_manager.user_info.get("contract_date"),
+            },
+            "bd": {
+                "text": user_query,
+                "state": codes.ResponseStatus.SUCCESS
+            }
+        }
+        # 발신자(websocket)를 제외하고 다른 세션 참여자들에게만 전송
+        await ctx.ws_handler.broadcast_to_session(sid, user_message_broadcast, exclude_sender=websocket)
         
         # 4. 대화 이력 가져오기 (Redis에서)
         chat_history = []
@@ -376,7 +454,8 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                     "current_step": state_manager.current_step.value,
                     "user_response": user_query,
                     "user_name": state_manager.user_info.get("user_name") or asker,
-                    "role": role
+                    "role": role,
+                    "current_date": datetime.now().strftime("%Y-%m-%d")
                 }
                 classification_result = await manager.classify_response(
                     user_response=user_query,
@@ -442,6 +521,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                     "current_step": state_manager.current_step.value,
                     "current_step_prompt": current_step_prompt,
                     "user_query": effective_user_query,
+                    "current_date": datetime.now().strftime("%Y-%m-%d")
                 },
                 max_output_tokens=800,
                 temperature=0.0
@@ -502,15 +582,15 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             }
 
         # [Relaxation] LLM이 False라고 했더라도, 사용자가 명확한 진행 키워드를 사용했다면 진행 (상태 변경 없이 플래그만 True)
-        # 실제 상태 변경은 아래 if should_advance: 블록에서 move_to_next_step() 호출로 처리됨
+        # _CONFIRM_PATTERNS가 엄격하게 수정되었으므로(예: "다음 단계", "넘어가"), 모든 단계에서 적용 가능
         if not should_advance and state_manager.check_confirm_pattern(effective_user_query):
             should_advance = True
             step_advance_meta = {
                 "advance": True,
-                "reason": f"키워드 패턴 매칭: {effective_user_query[:30]}",
+                "reason": f"진행 의사 패턴 매칭: {effective_user_query[:30]}",
                 "source": "keyword_override"
             }
-            ctx.log.info(f"[WS]        -- Step advance override by keyword pattern: {effective_user_query}")
+            ctx.log.info(f"[WS]        -- Step advance override by explicit keyword pattern: {effective_user_query}")
 
         # [강화] 양측 합의 확인 로직: 키워드 + 양측 발화 + 순차적 동의 패턴 체크
         if not should_advance:
@@ -531,7 +611,9 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 # 이전: client 제안, 현재: provider 수락 or 이전: provider 제안, 현재: client 수락
                 if ("client" in prev_line and "provider" in curr_line) or ("provider" in prev_line and "client" in curr_line):
                     if any(kw in curr_line for kw in CONFIRM_KEYWORDS):
-                        sequential_agreement = True
+                        # [Safety] 제안 키워드가 함께 있으면 동의가 아닌 역제안으로 간주
+                        if not any(kw in curr_line for kw in PROPOSAL_KEYWORDS):
+                            sequential_agreement = True
             
             # 진행 조건: 양측 참여 + (확정 키워드 or 순차적 동의)
             if both_participated and (has_confirm_keyword or sequential_agreement):
@@ -548,14 +630,27 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 ctx.log.info(f"[WS]        -- Consent keyword detected but only one side participated, waiting for counterpart")
 
         # 분류 결과가 단계 완료로 판단된 경우에도 진행 플래그 설정
+        # 단, 양측 합의가 필요한 단계에서는 양측 참여 여부를 확인해야 함
         if not should_advance and classification_result and classification_result.get("is_complete"):
-            should_advance = True
-            step_advance_meta = {
-                "advance": True,
-                "reason": "응답 분류에서 완료로 판단",
-                "source": "classification"
-            }
-            ctx.log.info("[WS]        -- Step advance by classification is_complete flag")
+            # 양측 합의가 필수적인 단계인지 확인 (예: 예산, 기간 등)
+            steps_requiring_agreement = [ChatStep.WORK_SCOPE, ChatStep.WORK_PERIOD, ChatStep.BUDGET, ChatStep.REVISIONS, ChatStep.FINALIZATION]
+            
+            if state_manager.current_step in steps_requiring_agreement:
+                # [Strict] 합의가 필요한 단계에서는 단순 데이터 추출(is_complete)만으로 진행하지 않음
+                # 반드시 STEP_ADVANCE_CLASSIFICATION_PROMPT의 'advance: true' 또는 명시적 합의 키워드가 있어야 함
+                ctx.log.info(f"[WS]        -- Step {state_manager.current_step.value} requires strict agreement. Ignoring classification.is_complete.")
+                # should_advance = False (기본값 유지)
+            else:
+                # 합의가 덜 중요한 단계거나 초기 단계는 분류 결과 신뢰
+                should_advance = True
+                step_advance_meta = {
+                    "advance": True,
+                    "reason": "응답 분류에서 완료로 판단",
+                    "source": "classification"
+                }
+            
+            if should_advance:
+                ctx.log.info("[WS]        -- Step advance by classification is_complete flag")
 
         # 추가 폴백: 소개 단계에서 사용자가 의미 있는 입력을 하면 진행
         if not should_advance and state_manager.current_step == ChatStep.INTRODUCTION and user_query.strip():
@@ -626,7 +721,8 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                             placeholders={
                                 "conversation_context": conversation_context,
                                 "current_step": state_manager.current_step.value,
-                                "target_field": current_field
+                                "target_field": current_field,
+                                "current_date": datetime.now().strftime("%Y-%m-%d")
                             },
                             max_output_tokens=500,
                             temperature=0.1
@@ -838,23 +934,14 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         except Exception as e:
             ctx.log.warning(f"[WS]        -- RAG search failed: {e}")
 
-        # 카테고리(계약명) 정규화: 작업 범위를 그대로 쓰지 않고 문장형 표현을 정리
-        def _normalize_category(text: str) -> str:
-            if not text:
-                return "용역"
-            candidate = re.split(r"(을 의뢰|를 의뢰|을 의뢰하고|를 의뢰하고|을 의뢰할|를 의뢰할)", text)[0]
-            candidate = re.sub(r"[^0-9A-Za-z가-힣·\s]", " ", candidate)
-            candidate = re.sub(r"\s+", " ", candidate).strip()
-            return candidate if candidate else "용역"
-
         # 핵심 식별자/카테고리 기본값 보정 (이름이 없으면 템플릿이 '미기재'로 채워지는 문제 방지)
         resolved_client_name = state_manager.collected_data.get("client_name") or client_name_fixed or "미기재"
         resolved_provider_name = state_manager.collected_data.get("provider_name") or provider_name_fixed or "미기재"
         resolved_client_company = state_manager.collected_data.get("client_company") or resolved_client_name
         resolved_provider_company = state_manager.collected_data.get("provider_company") or resolved_provider_name
-        resolved_category = state_manager.collected_data.get("category") or _normalize_category(
-            state_manager.collected_data.get("work_scope") or ""
-        )
+        # [Modified] 카테고리 정규화 로직 제거 -> LLM이 생성 시점에 처리하도록 유도
+        # work_scope가 문장형이어도 그대로 전달
+        resolved_category = state_manager.collected_data.get("category") or state_manager.collected_data.get("work_scope") or "용역"
 
         # 수집 데이터에 기본값을 반영 (없을 때만 세팅)
         if not state_manager.collected_data.get("client_name"):
@@ -892,10 +979,11 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         common_placeholders = {
             "client_name": resolved_client_name,
             "provider_name": resolved_provider_name,
-            "user_name": state_manager.user_info.get("user_name") or asker or "사용자",
-            "role": state_manager.user_info.get("role") or hd.get("role") or "client",
+            "user_name": hd.get("user_name") or asker or "사용자",
+            "role": hd.get("role") or "client",
             "role_korean": role_korean,
-            "contract_date": state_manager.user_info.get("contract_date") or hd.get("contract_date") or "",
+            "contract_date": hd.get("contract_date") or "",
+            "current_date": datetime.now().strftime("%Y-%m-%d"),
             "current_step": state_manager.current_step.value,
             "previous_step": previous_step_value,
             "step_guide": current_step_prompt,
@@ -1037,9 +1125,9 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 "role": "assistant",
                 "asker": asker,
                 "step": state_manager.current_step.value,
-                "user_name": state_manager.user_info.get("user_name") or asker,
-                "role_name": state_manager.user_info.get("role"),
-                "contract_date": state_manager.user_info.get("contract_date"),
+                "user_name": hd.get("user_name") or asker,
+                "role_name": hd.get("role"),
+                "contract_date": hd.get("contract_date"),
             },
             "bd": {
                 "text": user_message,
@@ -1056,7 +1144,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         
         await store_chat_message(
             ctx, sid, "assistant",
-            {"hd": response["hd"], "bd": response["bd"], "sid": sid}
+            {"hd": response["hd"], "bd": response["bd"]}
         )
         
         ctx.log.info(f"[WS]        -- LLM response sent (step: {state_manager.current_step.value}, status: {'ERROR' if is_error_response else 'OK'})")
