@@ -7,7 +7,7 @@ from asyncio import to_thread
 from typing import Any, Dict, List, Optional, Union
 import orjson
 
-from src.service.conf.gemini_api_key import GEMINI_API_KEY
+# from src.service.conf.gemini_api_key import GEMINI_API_KEY
 from src.service.ai.asset.prompts.doq_prompts_injection import _INJECTION_PATTERNS
 
 
@@ -21,7 +21,7 @@ class LLMManager:
         self.model = model
 
         if self.provider == "gemini":
-            api_key = GEMINI_API_KEY
+            # api_key = GEMINI_API_KEY
             api_key = os.environ.get("GEMINI_API_KEY")
             # if not api_key:
             #     raise ValueError("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.")
