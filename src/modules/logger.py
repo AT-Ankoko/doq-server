@@ -120,6 +120,15 @@ def setup_logger(log_level, log_path, log_max_files):
     log_filename = log_path.replace("-%DATE%", "")
     backup_count = int(log_max_files.replace("d", ""))
 
+    # 로그 디렉터리 자동 생성 추가
+    log_dir = os.path.dirname(log_filename)
+    if log_dir and not os.path.exists(log_dir):
+        try:
+            os.makedirs(log_dir, exist_ok=True)
+            print(f"[Logger] Created log directory: {log_dir}")
+        except Exception as e:
+            print(f"[Logger] Failed to create log directory '{log_dir}': {e}", file=sys.stderr)
+            
     # 하루 단위 로테이션 설정 (테스트용)
     fileHandler = TimeSizeRotatingFileHandler(
         log_filename,

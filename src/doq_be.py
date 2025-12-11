@@ -221,4 +221,5 @@ app = AppFactory.create_app()
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("src.doq_be:app", host="0.0.0.0", port=9571, reload=True)
+    port = int(os.environ.get("PORT", "8000"))
+    uvicorn.run("src.doq_be:app", host="0.0.0.0", port=port, reload=True)
