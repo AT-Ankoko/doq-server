@@ -208,7 +208,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             
             await store_chat_message(
                 ctx, sid, "assistant", 
-                {"hd": response["hd"], "bd": response["bd"], "sid": sid}
+                {"hd": response["hd"], "bd": response["bd"]}
             )
             await send_json_safe(response)
             return
@@ -233,26 +233,26 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         state_manager = await SessionStateCache.get(sid, ctx)
         if not state_manager:
             user_info = {
-                "user_name": hd.get("user_name") or hd.get("asker"),
-                "role": hd.get("role"),
-                "contract_date": hd.get("contract_date"),
+                "userId": hd.get("userId"),
+                "client_name": client_name_fixed,
+                "provider_name": provider_name_fixed,
             }
             state_manager = ChatStateManager(sid, user_info)
             await SessionStateCache.save(state_manager, ctx)
 
         
             # 역할 한글 표현
-            role_korean = "의뢰인(갑)" if user_info.get('role') == 'client' else "용역자(을)"
-            ctx.log.info(f"[WS]        -- New session state created for {sid}, user: {user_info.get('user_name')} ({user_info.get('role')})")
+            role_korean = "의뢰인(갑)" if hd.get('role') == 'client' else "용역자(을)"
+            ctx.log.info(f"[WS]        -- New session state created for {sid}, user: {hd.get('user_name')} ({hd.get('role')})")
         else:
             ctx.log.debug(f"[WS]        -- Loaded session state for {sid}, current_step: {state_manager.current_step.value}")
             # 매 메시지마다 user_info 업데이트 (프론트에서 전송된 최신 정보로)
-            if hd.get("user_name"):
-                state_manager.user_info["user_name"] = hd.get("user_name")
-            if hd.get("role"):
-                state_manager.user_info["role"] = hd.get("role")
-            if hd.get("contract_date"):
-                state_manager.user_info["contract_date"] = hd.get("contract_date")
+            # if hd.get("user_name"):
+            #     state_manager.user_info["user_name"] = hd.get("user_name")
+            # if hd.get("role"):
+            #     state_manager.user_info["role"] = hd.get("role")
+            # if hd.get("contract_date"):
+            #     state_manager.user_info["contract_date"] = hd.get("contract_date")
         
         # [Fix] collected_data에 참여자 이름 정보 동기화
         if client_name_fixed and client_name_fixed != "의뢰인":
@@ -261,7 +261,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             state_manager.collected_data["provider_name"] = provider_name_fixed
 
         # 3. 사용자 입력 기록
-        role = state_manager.user_info.get("role", "client")
+        role = hd.get("role", "client")
         state_manager.add_role_input(role, user_query)
         
         # 3.5. 사용자 입력을 Redis 스트림에 저장 (participant에 역할 포함)
@@ -979,10 +979,10 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         common_placeholders = {
             "client_name": resolved_client_name,
             "provider_name": resolved_provider_name,
-            "user_name": state_manager.user_info.get("user_name") or asker or "사용자",
-            "role": state_manager.user_info.get("role") or hd.get("role") or "client",
+            "user_name": hd.get("user_name") or asker or "사용자",
+            "role": hd.get("role") or "client",
             "role_korean": role_korean,
-            "contract_date": state_manager.user_info.get("contract_date") or hd.get("contract_date") or "",
+            "contract_date": hd.get("contract_date") or "",
             "current_date": datetime.now().strftime("%Y-%m-%d"),
             "current_step": state_manager.current_step.value,
             "previous_step": previous_step_value,
@@ -1125,9 +1125,9 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 "role": "assistant",
                 "asker": asker,
                 "step": state_manager.current_step.value,
-                "user_name": state_manager.user_info.get("user_name") or asker,
-                "role_name": state_manager.user_info.get("role"),
-                "contract_date": state_manager.user_info.get("contract_date"),
+                "user_name": hd.get("user_name") or asker,
+                "role_name": hd.get("role"),
+                "contract_date": hd.get("contract_date"),
             },
             "bd": {
                 "text": user_message,
@@ -1144,7 +1144,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         
         await store_chat_message(
             ctx, sid, "assistant",
-            {"hd": response["hd"], "bd": response["bd"], "sid": sid}
+            {"hd": response["hd"], "bd": response["bd"]}
         )
         
         ctx.log.info(f"[WS]        -- LLM response sent (step: {state_manager.current_step.value}, status: {'ERROR' if is_error_response else 'OK'})")

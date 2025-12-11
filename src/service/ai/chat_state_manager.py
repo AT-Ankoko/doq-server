@@ -49,9 +49,9 @@ class ChatStateManager:
         
         # 사용자 정보 (snake_case)
         self.user_info = {
-            "user_name": user_info.get("user_name") if user_info else None,
-            "role": user_info.get("role") if user_info else None,
-            "contract_date": user_info.get("contract_date") if user_info else None,
+            "userId": user_info.get("userId") if user_info else None,
+            "client_name": user_info.get("client_name") if user_info else None,
+            "provider_name": user_info.get("provider_name") if user_info else None,
         }
         
         # 수집된 정보
