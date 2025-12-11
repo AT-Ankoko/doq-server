@@ -30,6 +30,9 @@ async def list_archived_sessions(request: Request):
                 "progress": data.get("progress_percentage")
             })
             
+        # updated_at 기준 내림차순 정렬 (최신순)
+        summary_list.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+            
         return {
             "state": codes.ResponseStatus.SUCCESS,
             "data": summary_list
