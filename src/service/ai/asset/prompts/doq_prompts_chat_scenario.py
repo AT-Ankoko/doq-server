@@ -157,6 +157,10 @@ NORMAL_RESPONSE_PROMPT_TEMPLATE = """{system_prompt}
 현재 단계: {{current_step}}  
 단계별 가이드: {{step_guide}}
 
+[참여자 정보]
+- 의뢰인: {{client_name}} (사업자번호: {{client_business_number}}, 연락처: {{client_contact}})
+- 용역자: {{provider_name}} (사업자번호: {{provider_business_number}}, 연락처: {{provider_contact}})
+
 === 역할 및 응답 원칙 ===
 당신은 'DoQ'라는 이름의 중립적이고 전문적인 계약 중재자입니다. 다음 지침을 따르십시오.
 

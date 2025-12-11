@@ -216,6 +216,10 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         # Redis에서 session_info 로드 (참여자 이름 확인)
         client_name_fixed = "의뢰인"
         provider_name_fixed = "용역자"
+        client_business_number = "미기재"
+        client_contact = "미기재"
+        provider_business_number = "미기재"
+        provider_contact = "미기재"
         try:
             redis_client = ctx.redis_handler.get_client()
             session_key = f"session:info:{sid}"
@@ -224,6 +228,10 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 session_info = orjson.loads(session_info_json)
                 client_name_fixed = session_info.get("client_name") or "의뢰인"
                 provider_name_fixed = session_info.get("provider_name") or "용역자"
+                client_business_number = session_info.get("client_business_number") or "미기재"
+                client_contact = session_info.get("client_contact") or "미기재"
+                provider_business_number = session_info.get("provider_business_number") or "미기재"
+                provider_contact = session_info.get("provider_contact") or "미기재"
         except Exception as e:
             ctx.log.warning(f"[WS]        -- Failed to load session info in handler: {e}")
             # 폴백: 쿼리 파라미터에서 읽기 (하지만 handle_llm_invocation에는 websocket 객체가 직접 전달되지 않음)
@@ -979,6 +987,10 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         common_placeholders = {
             "client_name": resolved_client_name,
             "provider_name": resolved_provider_name,
+            "client_business_number": client_business_number,
+            "client_contact": client_contact,
+            "provider_business_number": provider_business_number,
+            "provider_contact": provider_contact,
             "user_name": hd.get("user_name") or asker or "사용자",
             "role": hd.get("role") or "client",
             "role_korean": role_korean,
