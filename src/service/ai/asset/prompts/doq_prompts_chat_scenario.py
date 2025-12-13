@@ -153,8 +153,13 @@ RESPONSE_CLASSIFICATION_PROMPT = """
 
 NORMAL_RESPONSE_PROMPT_TEMPLATE = """{system_prompt}
 
+현재 날짜: {{current_date}}
 현재 단계: {{current_step}}  
 단계별 가이드: {{step_guide}}
+
+[참여자 정보]
+- 의뢰인: {{client_name}} (사업자번호: {{client_business_number}}, 연락처: {{client_contact}})
+- 용역자: {{provider_name}} (사업자번호: {{provider_business_number}}, 연락처: {{provider_contact}})
 
 === 역할 및 응답 원칙 ===
 당신은 'DoQ'라는 이름의 중립적이고 전문적인 계약 중재자입니다. 다음 지침을 따르십시오.
@@ -177,6 +182,7 @@ NORMAL_RESPONSE_PROMPT_TEMPLATE = """{system_prompt}
 5. 계약서 문체 변환  
    - 사용자의 구어체 표현은 계약서 초안 작성 시 **법적 효력이 있는 전문 문어체**로 정제하여 변환합니다.  
      예: "돈은 반반씩 줄게요" → "대금은 착수금 50%, 잔금 50%로 분할 지급한다."
+   - **계약명(category) 정규화**: 템플릿의 '용역명'이나 '작업 범위'가 문장형(예: "로고를 만들고 싶어요")으로 되어 있다면, 이를 간결한 명사형(예: "로고 디자인")으로 변환하여 기재하십시오.
 
 === 대화 기록 (문맥 유지용) ===  
 {{conversation_context}}  
@@ -220,6 +226,7 @@ NORMAL_RESPONSE_PROMPT_TEMPLATE = """{system_prompt}
 
 STEP_TRANSITION_PROMPT_TEMPLATE = """{system_prompt}
 
+현재 날짜: {{current_date}}
 이전 단계: {{previous_step}} - {{previous_step_guide}}
 현재 단계: {{current_step}} - {{step_guide}}
 
@@ -228,6 +235,7 @@ STEP_TRANSITION_PROMPT_TEMPLATE = """{system_prompt}
 1. 새로운 단계로 진입할 때, 양측({{client_name}}, {{provider_name}})에게 간단히 단계 전환을 알립니다.
 2. 질문은 자연스러운 대화 형식으로 진행하며, 양측의 의견을 고루 청취하도록 유도합니다.
 3. 과도한 설명은 피하고 핵심 정보 수집에 집중합니다.
+4. 계약서 초안 작성 시, '용역명' 등이 문장형이면 명사형(예: "로고 디자인")으로 정제하여 기재합니다.
 
 === 대화 기록 (참고용) ===
 {{conversation_context}}
@@ -266,6 +274,7 @@ STEP_TRANSITION_PROMPT_TEMPLATE = """{system_prompt}
 STEP_ADVANCE_CLASSIFICATION_PROMPT = """
 아래는 client / provider / assistant 간의 대화 로그입니다.
 
+현재 날짜: {{current_date}}
 현재 단계: {{current_step}}  
 단계 가이드: {{current_step_prompt}}  
 최근 대화(최신순):  
@@ -342,6 +351,7 @@ DoQ를 이용해 주셔서 감사합니다!
 STEP_SUMMARY_PROMPT = """
 아래 대화 내용을 바탕으로 현재 단계({{current_step}})에서 최종적으로 합의된 내용을 요약하여 추출하세요.
 
+현재 날짜: {{current_date}}
 대화 기록:
 {{conversation_context}}
 

@@ -11,9 +11,13 @@ router = APIRouter(prefix="/v1/session", tags=["Session"])
 
 class SessionConnectRequest(BaseModel):
     userId: str
-    client_name: Optional[str] = None
-    provider_name: Optional[str] = None
+    client_name: str
+    provider_name: str
     contract_date: Optional[str] = None
+    client_business_number: Optional[str] = None
+    client_contact: Optional[str] = None
+    provider_business_number: Optional[str] = None
+    provider_contact: Optional[str] = None
 
 class SessionConnectResponse(BaseModel):
     sid: str
@@ -36,9 +40,13 @@ async def connect_session(request: Request, body: SessionConnectRequest):
     # 세션 정보 저장 (Redis에 저장)
     session_info = {
         "userId": user_id,
-        "client_name": body.client_name or "의뢰인",
-        "provider_name": body.provider_name or "용역자",
+        "client_name": body.client_name,
+        "provider_name": body.provider_name,
         "contract_date": body.contract_date,
+        "client_business_number": body.client_business_number,
+        "client_contact": body.client_contact,
+        "provider_business_number": body.provider_business_number,
+        "provider_contact": body.provider_contact,
         "createdAt": None,
     }
     
