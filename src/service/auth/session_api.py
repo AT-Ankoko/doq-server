@@ -1,30 +1,16 @@
 # src/service/api/cli_session_api.py
 
 from fastapi import APIRouter, Request, HTTPException
-from pydantic import BaseModel
 from src.common.id_generator import generate_sid
+import src.service.auth.session_schema as session_schema
 import src.utils.redis_basic_utils as ru
 import orjson
-from typing import Optional
 
 router = APIRouter(prefix="/v1/session", tags=["Session"])
 
-class SessionConnectRequest(BaseModel):
-    userId: str
-    client_name: str
-    provider_name: str
-    contract_date: Optional[str] = None
-    client_business_number: Optional[str] = None
-    client_contact: Optional[str] = None
-    provider_business_number: Optional[str] = None
-    provider_contact: Optional[str] = None
-
-class SessionConnectResponse(BaseModel):
-    sid: str
-
 # 세션 연결 및 ID 발급
-@router.post("/connect", response_model=SessionConnectResponse)
-async def connect_session(request: Request, body: SessionConnectRequest):
+@router.post("/connect", response_model=session_schema.SessionConnectResponse)
+async def connect_session(request: Request, body: session_schema.SessionConnectRequest):
     """
     세션을 생성하고 세션 ID 반환
     client_name, provider_name, contract_date 등의 정보를 함께 저장
