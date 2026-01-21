@@ -3,11 +3,7 @@ from src.service.messaging.ws_processor import processor
 from src.utils.chat_stream_utils import store_chat_message
 from src.service.ai.chat_state_manager import SessionStateCache, ChatStateManager, ChatStep, ChatEvent
 
-from src.service.ai.asset.prompts.prompts_cfg import SYSTEM_PROMPTS
-import src.service.ai.asset.prompts.doq_prompts_chat_scenario as scenario
-from src.service.ai.asset.prompts.doq_contract_template import CONTRACT_TEMPLATE
-from src.service.ai.asset.prompts.doq_prompts_rag import QUESTION_DETECTION_PROMPT, RAG_ANSWER_PROMPT, RAG_ANSWER_ALREADY_SENT_PROMPT
-from src.service.ai.asset.prompts.doq_prompts_confirmation import _CONTRACT_COMPLETION_PATTERNS, CONFIRM_KEYWORDS, PROPOSAL_KEYWORDS
+import src.service.ai.asset.prompts.prompts_cfg as prompt
 from src.service.ai.rag_manager import RAGManager
 
 import src.common.common_codes as codes
@@ -74,7 +70,7 @@ async def websocket_chat(websocket: WebSocket):
                 contract_date = websocket.query_params.get("contract_date")
 
             # START_MESSAGE_PROMPT 렌더링 (간단 치환)
-            greeting_text = scenario.START_MESSAGE_PROMPT
+            greeting_text = prompt.START_MESSAGE_PROMPT
             greeting_text = greeting_text.replace("{{client_name}}", client_name)
             greeting_text = greeting_text.replace("{{service_provider_name}}", provider_name)
 
@@ -376,7 +372,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         if user_query.strip():
             try:
                 # 프롬프트 파일에서 로드한 템플릿 사용
-                detection_prompt = QUESTION_DETECTION_PROMPT.format(
+                detection_prompt = prompt.QUESTION_DETECTION_PROMPT.format(
                     user_query=user_query,
                     current_step=state_manager.current_step.value
                 )
@@ -421,7 +417,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                     rag_results_qa = rag_manager_qa.search(search_q, k=2)
                     
                     # Generate Answer
-                    ans_prompt = RAG_ANSWER_PROMPT.format(
+                    ans_prompt = prompt.RAG_ANSWER_PROMPT.format(
                         user_query=user_query,
                         rag_context=rag_results_qa
                     )
@@ -523,7 +519,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         step_advance_meta = {"advance": False, "reason": "", "source": "llm"}
         try:
             decision_text = await manager.generate(
-                scenario.STEP_ADVANCE_CLASSIFICATION_PROMPT,
+                prompt.STEP_ROUTER_PROMPT,
                 placeholders={
                     "conversation_context": conversation_context,
                     "current_step": state_manager.current_step.value,
@@ -608,8 +604,8 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             both_participated = has_client and has_provider
             
             # 확정/제안 키워드 (프롬프트 파일에서 관리)
-            has_confirm_keyword = any(kw in effective_user_query for kw in CONFIRM_KEYWORDS)
-            has_proposal_keyword = any(kw in effective_user_query for kw in PROPOSAL_KEYWORDS)
+            has_confirm_keyword = any(kw in effective_user_query for kw in prompt.CONFIRM_KEYWORDS)
+            has_proposal_keyword = any(kw in effective_user_query for kw in prompt.PROPOSAL_KEYWORDS)
             
             # 순차적 동의 패턴 확인: 최근 2개 메시지에서 제안→수락 흐름 체크
             sequential_agreement = False
@@ -618,9 +614,9 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 curr_line = chat_history[-1]
                 # 이전: client 제안, 현재: provider 수락 or 이전: provider 제안, 현재: client 수락
                 if ("client" in prev_line and "provider" in curr_line) or ("provider" in prev_line and "client" in curr_line):
-                    if any(kw in curr_line for kw in CONFIRM_KEYWORDS):
+                    if any(kw in curr_line for kw in prompt.CONFIRM_KEYWORDS):
                         # [Safety] 제안 키워드가 함께 있으면 동의가 아닌 역제안으로 간주
-                        if not any(kw in curr_line for kw in PROPOSAL_KEYWORDS):
+                        if not any(kw in curr_line for kw in prompt.PROPOSAL_KEYWORDS):
                             sequential_agreement = True
             
             # 진행 조건: 양측 참여 + (확정 키워드 or 순차적 동의)
@@ -673,7 +669,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         # [NEW] finalization 단계에서 계약서 완료 키워드 감지 시 completed로 강제 전환
         is_contract_completion_request = False
         if state_manager.current_step == ChatStep.FINALIZATION:
-            for pattern in _CONTRACT_COMPLETION_PATTERNS:
+            for pattern in prompt.CONTRACT_COMPLETION_PATTERNS:
                 if re.search(pattern, effective_user_query, flags=re.IGNORECASE):
                     is_contract_completion_request = True
                     should_advance = True
@@ -723,7 +719,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 # [NEW] LLM을 이용한 단계별 최종 합의 내용 요약 및 저장
                 if current_field:
                     try:
-                        summary_prompt = scenario.STEP_SUMMARY_PROMPT
+                        summary_prompt = prompt.STEP_SUMMARY_PROMPT
                         summary_text = await manager.generate(
                             summary_prompt,
                             placeholders={
@@ -812,7 +808,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
 
             # 확정 메시지 전송 (다음 단계 안내)
             template_key = "complete" if next_step == ChatStep.COMPLETED else "next"
-            template = scenario.MESSAGE_TEMPLATES[template_key]
+            template = prompt.MESSAGE_TEMPLATES[template_key]
             response_text = template.format(step=prev_step_name, next_step=next_step_name)
 
             # [NEW] COMPLETED 단계 진입 시 계약서 전문 생성
@@ -828,9 +824,9 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                 else:
                     # LLM을 통해 최종 계약서 생성
                     try:
-                        final_contract_prompt = scenario.FINAL_CONTRACT_GENERATION_PROMPT.format(
+                        final_contract_prompt = prompt.FINAL_CONTRACT_GENERATION_PROMPT.format(
                             collected_data_json=collected_data_json,
-                            contract_template=CONTRACT_TEMPLATE
+                            contract_template=prompt.CONTRACT_TEMPLATE
                         )
                         final_contract_draft = await manager.generate(
                             final_contract_prompt,
@@ -843,7 +839,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
                         final_contract_draft = previous_contract_draft or "계약서 생성에 실패했습니다. 다시 시도해주세요."
                 
                 # 완료 메시지 커스터마이징
-                response_text = scenario.COMPLETION_MESSAGE
+                response_text = prompt.COMPLETION_MESSAGE
 
             confirmation_response = {
                 "hd": {
@@ -900,7 +896,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
 
         # 이전 단계 정보 (STEP_TRANSITION_PROMPT에서 사용)
         previous_step_value = state_manager.step_history[-2].value if len(state_manager.step_history) >= 2 else ChatStep.INTRODUCTION.value
-        previous_step_prompt = state_manager.step_history[-2].prompt if len(state_manager.step_history) >= 2 else scenario.STEP_PROMPTS.get(ChatStep.INTRODUCTION.value, "")
+        previous_step_prompt = state_manager.step_history[-2].prompt if len(state_manager.step_history) >= 2 else prompt.STEP_PROMPTS.get(ChatStep.INTRODUCTION.value, "")
         
         # collected_data에서 null이 아닌 항목만 추출 (이미 수집된 정보)
         collected_fields_summary = []
@@ -923,7 +919,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         if current_step_key:
             val = state_manager.collected_data.get(current_step_key)
             if val:
-                step_specific_instruction = scenario.STEP_SPECIFIC_INSTRUCTION_TEMPLATE.format(
+                step_specific_instruction = prompt.STEP_SPECIFIC_INSTRUCTION_TEMPLATE.format(
                     current_step_key=current_step_key,
                     val=val
                 )
@@ -964,7 +960,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             state_manager.update_data("category", resolved_category)
 
         # [수정] 항상 전체 템플릿을 제공하여 계약서 전문 생성을 유도
-        template_to_use = CONTRACT_TEMPLATE
+        template_to_use = prompt.CONTRACT_TEMPLATE
         
         # [Fix] 템플릿 내의 기본 정보(이름, 회사, 카테고리 등)를 미리 치환하여 LLM에 제공
         template_placeholders = {
@@ -1014,7 +1010,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
         if classification_result and classification_result.get("next_action") == "ask_clarification":
             # clarification이 필요한 경우에도 LLM이 전체 응답 생성 (USER_MESSAGE + CONTRACT_DRAFT 포함)
             ctx.log.info(f"[WS]        -- Clarification needed for step: {state_manager.current_step.value}")
-            full_prompt = scenario.NORMAL_RESPONSE_PROMPT_TEMPLATE.replace("{system_prompt}", "\n".join(SYSTEM_PROMPTS))
+            full_prompt = prompt.NORMAL_RESPONSE_PROMPT_TEMPLATE.replace("{system_prompt}", "\n".join(prompt.SYSTEM_PROMPTS))
             
             # clarification 요청 내용을 프롬프트에 추가
             response_placeholders = {
@@ -1030,7 +1026,7 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             )
         elif confirmation_message_sent:
             # 확정 메시지를 보낸 후, 다음 step의 시작 프롬프트 생성
-            full_prompt = scenario.STEP_TRANSITION_PROMPT_TEMPLATE.replace("{system_prompt}", "\n".join(SYSTEM_PROMPTS))
+            full_prompt = prompt.STEP_TRANSITION_PROMPT_TEMPLATE.replace("{system_prompt}", "\n".join(prompt.SYSTEM_PROMPTS))
             
             response_text = await manager.generate(
                 full_prompt,
@@ -1040,11 +1036,11 @@ async def handle_llm_invocation(ctx, websocket, msg: dict):
             )
         else:
             # 정상적인 LLM 응답 생성
-            full_prompt = scenario.NORMAL_RESPONSE_PROMPT_TEMPLATE.replace("{system_prompt}", "\n".join(SYSTEM_PROMPTS))
+            full_prompt = prompt.NORMAL_RESPONSE_PROMPT_TEMPLATE.replace("{system_prompt}", "\n".join(prompt.SYSTEM_PROMPTS))
             
             # [NEW] 질문 답변 후 복귀 지침 추가
             if question_answered:
-                full_prompt += "\n" + RAG_ANSWER_ALREADY_SENT_PROMPT
+                full_prompt += "\n" + prompt.RAG_ANSWER_ALREADY_SENT_PROMPT
 
             # 정상 응답용 추가 placeholders
             response_placeholders = {
