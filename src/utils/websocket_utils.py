@@ -21,7 +21,7 @@ async def ws_send_response(ctx, sid: str, body: dict) -> bool:
     if ws:
         try:
             await ws.send_json(body)
-            log.info("WS", f">> Send message to sid={sid}: {body}")
+            log.debug("WS", f">> Send message to sid={sid}: {body}")
             return True
         except Exception as e:
             log.warning("WS", f"- Failed to send to sid={sid}: {e}")

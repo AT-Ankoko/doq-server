@@ -91,7 +91,7 @@ async def redis_stream_wait_result(ctx, stream_key: str, timeout=10_000):
                 for k, v in data.items()
             }
 
-            log.info("REDIS", f"<< Result received from '{stream_key}': {parsed_data}")
+            log.debug("REDIS", f"<< Result received from '{stream_key}': {parsed_data}")
             return parsed_data
 
         log.warning("REDIS", f"== No result in '{stream_key}' (timeout={timeout}ms)")
