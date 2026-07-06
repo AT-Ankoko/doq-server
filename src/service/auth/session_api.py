@@ -6,7 +6,7 @@ import src.service.auth.session_schema as session_schema
 import src.utils.redis_basic_utils as ru
 import orjson
 
-router = APIRouter(prefix="/v1/session", tags=["Session"])
+router = APIRouter(prefix="/doq/session", tags=["Session"])
 
 # 세션 연결 및 ID 발급
 @router.post("/connect", response_model=session_schema.SessionConnectResponse)

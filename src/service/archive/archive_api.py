@@ -6,7 +6,7 @@ from src.service.ai.chat_state_manager import SessionStateCache
 from src.utils.redis_stream_utils import redis_stream_range
 import src.common.common_codes as codes
 
-router = APIRouter(prefix="/v1/archive", tags=["Archive"])
+router = APIRouter(prefix="/doq/archive", tags=["Archive"])
 
 @router.get("/sessions", response_model=Dict[str, Any])
 async def list_archived_sessions(request: Request):
