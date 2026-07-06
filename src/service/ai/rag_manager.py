@@ -19,7 +19,7 @@ class RAGManager:
             
         self.reference_dir = reference_dir
         self.index_path = index_path
-        self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=GEMINI_API_KEY)
+        self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-004", google_api_key=GEMINI_API_KEY)
         self.vector_store = self._load_or_create_index()
         self.initialized = True
 
