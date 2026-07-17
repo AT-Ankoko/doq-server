@@ -16,7 +16,7 @@ from datetime import datetime
 
 # 서버 설정
 SERVER_URL = "ws://localhost:9751"
-CHAT_ENDPOINT = "/v1/session/chat"
+CHAT_ENDPOINT = "/api/session/chat"
 SESSION_ID = "test_room_001"
 
 async def send_message(websocket, role: str, event: str, text: str = None, prompt: str = None):

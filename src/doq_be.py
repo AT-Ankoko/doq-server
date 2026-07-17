@@ -20,7 +20,7 @@ import asyncio
 from src.app_context import AppContext
 
 from service.basic.basic_api import router as basic_router
-from service.auth.session_api import router as session_router
+from service.session.session_api import router as session_router
 from service.ai.chat_ws import router as chat_ws_router
 from service.archive.archive_api import router as archive_router
 

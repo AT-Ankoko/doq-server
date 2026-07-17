@@ -1,12 +1,12 @@
-# src/service/api/cli_session_api.py
+# src/service/session/session_api.py
 
 from fastapi import APIRouter, Request, HTTPException
-from src.common.id_generator import generate_sid
-import src.service.auth.session_schema as session_schema
+from src.core.id_generator import generate_sid
+import src.service.session.session_schema as session_schema
 import src.utils.redis_basic_utils as ru
 import orjson
 
-router = APIRouter(prefix="/v1/session", tags=["Session"])
+router = APIRouter(prefix="/api/session", tags=["Session"])
 
 # 세션 연결 및 ID 발급
 @router.post("/connect", response_model=session_schema.SessionConnectResponse)

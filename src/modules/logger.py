@@ -120,6 +120,10 @@ def setup_logger(log_level, log_path, log_max_files):
     log_filename = log_path.replace("-%DATE%", "")
     backup_count = int(log_max_files.replace("d", ""))
 
+    log_dir = os.path.dirname(log_filename)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+
     # 하루 단위 로테이션 설정 (테스트용)
     fileHandler = TimeSizeRotatingFileHandler(
         log_filename,
