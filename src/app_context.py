@@ -15,6 +15,7 @@ from typing import Optional
 import modules.logger as logger
 
 from src.modules.system_monitor import SystemMonitor
+from src.handler.db_handler import DBHandler
 from src.handler.websocket_handler import WebSocketHandler
 from src.handler.redis_handler import RedisHandler
 from src.handler.redis_stream_consumer import RedisStreamConsumer
@@ -46,7 +47,16 @@ class RedisConsumerConfig(BaseModel):
     stream_key: Optional[str]
     group_name: Optional[str]
     consumer_name: Optional[str]
-    
+        
+class DBConfig(BaseModel):
+    host: Optional[str]
+    port: Optional[int]
+    user: Optional[str]
+    password: Optional[str] = None
+    database: Optional[str] = None
+    charset: Optional[str] = "utf8mb4"
+    autocommit: Optional[bool] = True
+
 class LLMConfig(BaseModel):
     provider: str           # "ollama" | "openai" | ...
     model: str              # "llama3.2" 등
@@ -60,12 +70,12 @@ class AppConfig(BaseModel):
     port: int
     secret_key: str
     access_token_expire_minutes: int
-
     # 구성 요소들
     logger: LoggerConfig
     http_config: Optional[HTTPConfig] = None
     redis: Optional[RedisConfig] = None
     redis_consumer: Optional[RedisConsumerConfig] = None
+    db: Optional[DBConfig] = None
 
     # 시스템 모니터링 관련 기본값 설정
     enable_monitoring: Optional[bool] = True
@@ -148,6 +158,14 @@ class AppContext:
         self.redis_consumer = RedisStreamConsumer(self)
         
         self.log.debug("- end init RedisStreamConsumer")
+
+    def _init_db(self) -> None:
+        """호환성 유지용 래퍼"""
+        self.log.debug("+ start init DB")
+
+        self.db_handler = DBHandler(self)
+
+        self.log.debug("- end init DB")
         
     def _init_system_manager(self):
         self.log.debug("+ start init system manager")
