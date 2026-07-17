@@ -138,7 +138,7 @@ class AppFactory:
     async def _initialize_handlers(ctx: AppContext) -> None:
         """핸들러 초기화"""    
         ctx.log.info("     - Initializing handlers...")
-        ctx._init_db()  # 테이블 미존재 시 자동으로 스키마·시드 초기화 실행
+        # ctx._init_db()  # 테이블 미존재 시 자동으로 스키마·시드 초기화 실행
         ctx._init_websocket()
         ctx._init_redis()
         ctx._init_redis_consumer()
