@@ -21,7 +21,7 @@ from src.app_context import AppContext
 
 from service.basic.basic_api import router as basic_router
 from service.session.session_api import router as session_router
-from service.ai.chat_ws import router as chat_ws_router
+from service.chatbot.chatbot_api import router as chatbot_ws_router
 from service.archive.archive_api import router as archive_router
 
 class AppFactory:
@@ -96,7 +96,7 @@ class AppFactory:
         routers = [
             basic_router,
             session_router,
-            chat_ws_router,
+            chatbot_ws_router,
             archive_router
         ]
         for router in routers:
