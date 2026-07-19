@@ -26,12 +26,14 @@ jsonpointer==3.0.0
 langchain==0.3.25
 langchain-community==0.3.24
 langchain-core==0.3.64
+langchain-ollama==0.2.3
 langchain-text-splitters==0.3.8
 langsmith==0.3.45
 marshmallow==3.26.1
 multidict==6.4.4
 mypy_extensions==1.1.0
 numpy==2.3.0
+ollama==0.6.2
 orjson==3.10.18
 packaging==24.2
 paho-mqtt==2.1.0
