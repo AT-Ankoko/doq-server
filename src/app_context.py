@@ -60,6 +60,8 @@ class DBConfig(BaseModel):
 class LLMConfig(BaseModel):
     provider: str           # "ollama" | "openai" | ...
     model: str              # "llama3.2" 등
+    base_url: Optional[str] # "http://127.0.0.1:11434"
+    timeout_seconds: Optional[int] # 120
 
 class AppConfig(BaseModel):
     # 상위 항목 직접 정의
@@ -191,7 +193,9 @@ class AppContext:
             self.llm_manager = LLMManager(
                 ctx=self,
                 provider=self.cfg.llm.provider,
-                model=self.cfg.llm.model
+                model=self.cfg.llm.model,
+                base_url=self.cfg.llm.base_url,
+                timeout_seconds=self.cfg.llm.timeout_seconds,
             )
             if self.log:
                 self.log.info(f"[LLM] manager ready (model={self.cfg.llm.model})")

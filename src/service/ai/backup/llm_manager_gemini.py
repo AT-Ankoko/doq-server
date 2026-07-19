@@ -1,11 +1,13 @@
 import json
 import re
-import os
-import requests
+import time
+import os  # 추가
+import google.generativeai as genai  # Gemini 라이브러리 추가
 from asyncio import to_thread
 from typing import Any, Dict, List, Optional, Union
 import orjson
 
+from src.service.conf.gemini_api_key import GEMINI_API_KEY
 from src.service.ai.asset.prompts.doq_prompts_injection import _INJECTION_PATTERNS
 
 
@@ -13,23 +15,21 @@ _PLACEHOLDER_RE = re.compile(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}")
 
 
 class LLMManager:
-    def __init__(
-        self,
-        ctx,
-        provider: str,
-        model: str,
-        base_url: Optional[str] = None,
-        timeout_seconds: Optional[int] = None,
-    ):
+    def __init__(self, ctx, provider: str, model: str):
         self.ctx = ctx
         self.provider = provider
         self.model = model
 
-        if self.provider != "ollama":
-            raise ValueError(f"Unsupported provider: {provider}. Supported provider is 'ollama'.")
-
-        self.ollama_base_url = (base_url or "http://127.0.0.1:11434").rstrip("/")
-        self.ollama_timeout = int(timeout_seconds or 120)
+        if self.provider == "gemini":
+            api_key = GEMINI_API_KEY
+            api_key = os.environ.get("GEMINI_API_KEY")
+            # if not api_key:
+            #     raise ValueError("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.")
+            
+            genai.configure(api_key=api_key)
+            self.gemini_model = genai.GenerativeModel(self.model)
+        else:
+            raise ValueError(f"Unsupported provider: {provider}. Supported provider is 'gemini'.")
 
     def _is_prompt_injection(self, text: str) -> bool:
         """
@@ -104,65 +104,40 @@ class LLMManager:
 
         final_prompt = self._compose_prompt(prompt, placeholders=placeholders)
 
-        if self.provider == "ollama":
-            ollama_options: Dict[str, Any] = {}
+        if self.provider == "gemini":
+            generation_config = genai.types.GenerationConfig(**options)
 
-            if "temperature" in options:
-                ollama_options["temperature"] = options["temperature"]
-            if "top_p" in options:
-                ollama_options["top_p"] = options["top_p"]
-            if "top_k" in options:
-                ollama_options["top_k"] = options["top_k"]
-            if "repeat_penalty" in options:
-                ollama_options["repeat_penalty"] = options["repeat_penalty"]
-            if "max_output_tokens" in options:
-                ollama_options["num_predict"] = options["max_output_tokens"]
-            if "num_predict" in options:
-                ollama_options["num_predict"] = options["num_predict"]
-
-            payload = {
-                "model": self.model,
-                "prompt": final_prompt,
-                "stream": False,
-            }
-            if ollama_options:
-                payload["options"] = ollama_options
-
-            def _call_ollama():
-                return requests.post(
-                    f"{self.ollama_base_url}/api/generate",
-                    json=payload,
-                    timeout=self.ollama_timeout,
+            def _call_gemini():
+                # 동기 함수인 generate_content를 비동기 컨텍스트에서 실행합니다.
+                return self.gemini_model.generate_content(
+                    final_prompt,
+                    generation_config=generation_config
                 )
 
             try:
-                response = await to_thread(_call_ollama)
-                if response.status_code >= 400:
-                    self.ctx.log.error(f"[LLM] Ollama API error {response.status_code}: {response.text}")
-                    if response.status_code == 404:
-                        return "죄송합니다. 요청한 Ollama 모델을 찾을 수 없습니다. 모델을 pull 한 뒤 다시 시도해주세요."
-                    if response.status_code == 429:
-                        return "죄송합니다. 현재 AI 서비스 사용량이 많아 잠시 후 다시 시도해주세요."
-                    return "죄송합니다. Ollama 요청 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
-
-                data = response.json()
-                output = (data.get("response") or "").strip()
-                if not output:
-                    self.ctx.log.warning("[LLM] Empty response from Ollama API")
+                response = await to_thread(_call_gemini)
+                if not response or not response.text:
+                    self.ctx.log.warning(f"[LLM] Empty response from Gemini API")
                     return "죄송합니다. 응답을 생성할 수 없습니다."
-
-                return output
-
-            except requests.Timeout:
-                self.ctx.log.error("[LLM] Ollama request timed out")
-                return "죄송합니다. Ollama 응답 시간이 초과되었습니다. 잠시 후 다시 시도해주세요."
-            except requests.RequestException as e:
-                self.ctx.log.error(f"[LLM] Ollama API 호출 중 네트워크 오류 발생: {e}")
-                return "죄송합니다. Ollama 서버에 연결할 수 없습니다. 서버 실행 상태를 확인해주세요."
+                return response.text
+            
             except Exception as e:
                 error_msg = str(e)
-                self.ctx.log.error(f"[LLM] Ollama API 호출 중 오류 발생: {error_msg}")
-                return "죄송합니다. AI 응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+                self.ctx.log.error(f"[LLM] Gemini API 호출 중 오류 발생: {error_msg}")
+                import traceback
+                self.ctx.log.error(f"[LLM] Traceback: {traceback.format_exc()}")
+                
+                # Rate limit 에러 처리
+                if "429" in error_msg or "Resource exhausted" in error_msg:
+                    error_response = "죄송합니다. 현재 AI 서비스 사용량이 많아 잠시 후 다시 시도해주세요. (API 할당량 초과)"
+                    self.ctx.log.warning(f"[LLM] Rate limit error - returning user-friendly message")
+                    return error_response
+                elif "400" in error_msg or "Invalid" in error_msg:
+                    return "죄송합니다. 요청 형식에 오류가 있습니다. 다시 시도해주세요."
+                elif "401" in error_msg or "403" in error_msg or "Unauthorized" in error_msg:
+                    return "죄송합니다. API 인증에 실패했습니다. 관리자에게 문의해주세요."
+                else:
+                    return f"죄송합니다. AI 응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
         
         return "지원하지 않는 provider입니다."
 

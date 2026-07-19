@@ -15,8 +15,10 @@
     },
     
     "llm": {
-      "provider": "gemini",
-      "model": "gemini-2.0-flash-lite"
+      "provider": "ollama",
+      "model": "exaone3.5:latest",
+      "base_url": "http://127.0.0.1:11434",
+      "timeout_seconds": 120
     },
     
     "redis": {
