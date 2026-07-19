@@ -6,7 +6,7 @@ import random
 import string
 
 SERVER_URL = "ws://localhost:9571"
-CHAT_ENDPOINT = "/v1/session/chat"
+CHAT_ENDPOINT = "/api/session/chat"
 
 SESSION_PREFIX = "full_scenario_test"
 

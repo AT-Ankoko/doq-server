@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "7e5f6d6b-6b2f-4f9e-8c91-4d1d2f8f0d11",
     "name": "DOQ Server API",
-    "description": "Postman collection for the DOQ Server FastAPI application.\n\nBase URL: http://localhost:9571\n\nActual route prefixes in code: /api/basic, /api/session, /api/archive\nWebSocket endpoint: /v1/session/chat?sid={{sid}} (use a Postman WebSocket request separately if needed)",
+    "description": "Postman collection for the DOQ Server FastAPI application.\n\nBase URL: http://localhost:9571\n\nActual route prefixes in code: /api/basic, /api/session, /api/archive\nWebSocket endpoint: /api/session/chat?sid={{sid}} (use a separate Postman WebSocket request)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [

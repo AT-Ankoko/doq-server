@@ -2,17 +2,17 @@
   "doq_be": {
     "ws": {
       "chat.message": {
-        "websocket": "/v1/session/chat",
+        "websocket": "/api/session/chat",
         "handler": "src.service.ai.chat_ws.handle_llm_invocation",
         "description": "사용자 채팅 메시지 처리 (LLM 경유)"
       },
       "llm.invoke": {
-        "websocket": "/v1/session/chat",
+        "websocket": "/api/session/chat",
         "handler": "src.service.ai.chat_ws.handle_llm_invocation",
         "description": "LLM 호출 요청 처리"
       },
       "typing": {
-        "websocket": "/v1/session/chat",
+        "websocket": "/api/session/chat",
         "handler": "src.service.messaging.ws_processor.process_typing_indicator",
         "description": "사용자 입력 중 표시"
       }

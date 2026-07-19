@@ -15,7 +15,7 @@ import time
 from datetime import datetime
 
 # 서버 설정
-SERVER_URL = "ws://localhost:9751"
+SERVER_URL = "ws://localhost:9571"
 CHAT_ENDPOINT = "/api/session/chat"
 SESSION_ID = "test_room_001"
 

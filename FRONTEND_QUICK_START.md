@@ -11,11 +11,11 @@
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| `GET` | `/v1/basic/ping` | 서버 상태 확인 (Health Check) |
-| `POST` | `/v1/session/connect` | 세션 생성 및 SID 발급 |
-| `WS` | `/v1/session/chat` | 실시간 채팅 (WebSocket) |
-| `GET` | `/v1/archive/sessions` | 전체 세션 목록 조회 |
-| `GET` | `/v1/archive/session/{sid}` | 특정 세션 상세 및 채팅 이력 조회 |
+| `GET` | `/api/basic/ping` | 서버 상태 확인 (Health Check) |
+| `POST` | `/api/session/connect` | 세션 생성 및 SID 발급 |
+| `WS` | `/api/session/chat` | 실시간 채팅 (WebSocket) |
+| `GET` | `/api/archive/sessions` | 전체 세션 목록 조회 |
+| `GET` | `/api/archive/session/{sid}` | 특정 세션 상세 및 채팅 이력 조회 |
 
 ---
 
@@ -25,7 +25,7 @@
 
 채팅을 시작하기 전에 먼저 세션 ID(`sid`)를 발급받아야 합니다.
 
-- **URL**: `POST /v1/session/connect`
+- **URL**: `POST /api/session/connect`
 - **Request Body**:
   ```json
   {
@@ -46,7 +46,7 @@
 
 발급받은 `sid`를 사용하여 WebSocket을 연결합니다.
 
-- **URL**: `ws://localhost:9571/v1/session/chat?sid={sid}`
+- **URL**: `ws://localhost:9571/api/session/chat?sid={sid}`
 - **Query Params**:
   - `sid`: (필수) 세션 ID
 

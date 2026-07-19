@@ -13,7 +13,7 @@ import json
 import re
 from datetime import datetime
 
-router = APIRouter(prefix="/v1/session", tags=["Session"])
+router = APIRouter(prefix="/api/session", tags=["Session"])
 
 @router.websocket("/chat")
 async def websocket_chat(websocket: WebSocket):
