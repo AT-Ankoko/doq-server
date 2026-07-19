@@ -21,8 +21,8 @@ from src.app_context import AppContext
 
 from service.basic.basic_api import router as basic_router
 from service.session.session_api import router as session_router
-from service.chatbot.chatbot_api import router as chatbot_ws_router
 from service.archive.archive_api import router as archive_router
+from service.chatbot.chatbot_ws import router as chatbot_ws_router
 
 class AppFactory:
     """애플리케이션 팩토리 클래스"""

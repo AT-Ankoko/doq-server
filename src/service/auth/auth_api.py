@@ -92,12 +92,12 @@ async def updateUser(request: Request, body: UserUpdateRequest, user=Depends(req
     내 정보 수정 (JWT 인증) -> 스키마 구조(body.fileId)를 유지한 채 서비스에 바인딩
     """
     ctx = request.app.state.ctx
-    userId = user["id"]
+    user_id = user["id"]
     
     # 클라이언트가 실제로 전송한 필드만 추출 (여기서 fileId에 파일 경로 문자열이 담겨 있습니다)
     update_data = body.model_dump(exclude_unset=True)
     
-    success = auth_service.update_user(ctx, userId, update_data)
+    success = auth_service.update_user(ctx, user_id, update_data)
     if success:
         return build_success_response({"message": "User updated successfully"})
     else:

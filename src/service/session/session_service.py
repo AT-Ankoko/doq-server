@@ -5,15 +5,15 @@ import orjson
 
 
 async def connect_session(ctx, body):
-    user_id = body.userId.strip()
+    user_id = body.user_id.strip()
 
     if not user_id:
-        return build_response_body(ResponseStatus.BAD_REQUEST, {"detail": "userId는 필수입니다."})
+        return build_response_body(ResponseStatus.BAD_REQUEST, {"detail": "user_id는 필수입니다."})
 
     sid = generate_sid()
 
     session_info = {
-        "userId": user_id,
+        "user_id": user_id,
         "client_name": body.client_name,
         "provider_name": body.provider_name,
         "contract_date": body.contract_date,
