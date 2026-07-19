@@ -7,7 +7,6 @@ import src.service.ai.asset.prompts.prompts_cfg as prompt
 from src.service.ai.rag_manager import RAGManager
 from src.service.ai.chat_session_manager import ChatSessionManager
 
-import src.core.common_codes as codes
 import orjson
 import json
 import re

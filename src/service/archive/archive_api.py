@@ -1,10 +1,7 @@
-from typing import Dict, Any
-
 from fastapi import APIRouter, Request
 
 from src.service.archive.archive_service import get_session_archive as get_session_archive_service
 from src.service.archive.archive_service import list_archived_sessions as list_archived_sessions_service
-from src.service.archive.archive_schema import ArchiveSessionDetail, ArchivedSessionSummary
 
 router = APIRouter(prefix="/api/archive", tags=["Archive"])
 

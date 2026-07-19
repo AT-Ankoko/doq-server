@@ -1,4 +1,3 @@
-import src.core.common_codes as codes
 from src.utils.event_dispatcher_utils import dispatch_event
 
 async def processor(ctx, websocket, msg):

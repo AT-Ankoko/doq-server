@@ -5,7 +5,6 @@ from typing import Any, Dict, Optional, Tuple
 import orjson
 from fastapi import WebSocket
 
-import src.core.common_codes as codes
 from src.core.responses import ResponseStatus as ApiResponseStatus
 from src.core.responses import build_response_body, build_success_response
 from src.service.ai.asset.prompts import prompts_cfg as prompt
