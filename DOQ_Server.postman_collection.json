@@ -1,0 +1,125 @@
+{
+  "info": {
+    "_postman_id": "7e5f6d6b-6b2f-4f9e-8c91-4d1d2f8f0d11",
+    "name": "DOQ Server API",
+    "description": "Postman collection for the DOQ Server FastAPI application.\n\nBase URL: http://localhost:9571\n\nActual route prefixes in code: /api/basic, /api/session, /api/archive\nWebSocket endpoint: /v1/session/chat?sid={{sid}} (use a Postman WebSocket request separately if needed)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Basic",
+      "item": [
+        {
+          "name": "GET Ping",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/basic/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "basic",
+                "ping"
+              ]
+            },
+            "description": "Health check endpoint. Returns status, message, and tid."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Session",
+      "item": [
+        {
+          "name": "POST Connect Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"user-001\",\n  \"client_name\": \"의뢰인\",\n  \"provider_name\": \"용역자\",\n  \"contract_date\": \"2026-07-19\",\n  \"client_business_number\": \"123-45-67890\",\n  \"client_contact\": \"010-1234-5678\",\n  \"provider_business_number\": \"987-65-43210\",\n  \"provider_contact\": \"010-8765-4321\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/session/connect",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "session",
+                "connect"
+              ]
+            },
+            "description": "Create a session and receive a sid. userId is required."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Archive",
+      "item": [
+        {
+          "name": "GET Session List",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/archive/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "archive",
+                "sessions"
+              ]
+            },
+            "description": "List active sessions from Redis."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Session Archive By SID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/archive/session/{{sid}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "archive",
+                "session",
+                "{{sid}}"
+              ]
+            },
+            "description": "Get session state and chat history for a given sid."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:9571"
+    },
+    {
+      "key": "sid",
+      "value": "room001"
+    }
+  ]
+}
