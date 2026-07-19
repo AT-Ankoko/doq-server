@@ -1,0 +1,43 @@
+{
+  "info": {
+    "_postman_id": "c5f7fdd8-2a77-4f5f-95f1-0e3e7b7f52a1",
+    "name": "DOQ Server WebSocket",
+    "description": "WebSocket-only Postman collection for the DOQ Server chat endpoint.\n\nImportant: Postman saves WebSocket requests in a separate beta collection type and does not mix them with HTTP requests.\n\nConnect to: ws://localhost:9571/v1/session/chat?sid={{sid}}\nExample message body:\n{\n  \"hd\": { \"event\": \"chat.message\", \"role\": \"A\" },\n  \"bd\": { \"text\": \"안녕하세요!\" }\n}",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Chat Socket",
+      "request": {
+        "url": {
+          "raw": "ws://localhost:9571/v1/session/chat?sid={{sid}}",
+          "protocol": "ws",
+          "host": [
+            "localhost"
+          ],
+          "port": "9571",
+          "path": [
+            "v1",
+            "session",
+            "chat"
+          ],
+          "query": [
+            {
+              "key": "sid",
+              "value": "{{sid}}"
+            }
+          ]
+        },
+        "header": [],
+        "description": "Open a WebSocket connection for real-time session chat. Send JSON messages with hd/bd payloads."
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "sid",
+      "value": "room001"
+    }
+  ]
+}
