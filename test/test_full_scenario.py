@@ -164,7 +164,7 @@ async def send_message(websocket, role: str, text: str, display_name_map):
             "event": "chat.message",
             "role": role,
             "user_name": user_name,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": int(datetime.now().timestamp())
         },
         "bd": {"text": text}
     }
@@ -182,7 +182,7 @@ async def trigger_llm(websocket, role="client", display_name_map=None):
             "role": role,
             "asker": role,
             "user_name": user_name,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": int(datetime.now().timestamp())
         },
         "bd": {"text": ""}
     }

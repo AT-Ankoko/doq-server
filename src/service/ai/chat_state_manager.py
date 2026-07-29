@@ -82,8 +82,8 @@ class ChatStateManager:
         self.conflicts = []
         
         # 타임스탬프
-        self.created_at = datetime.now().isoformat()
-        self.updated_at = datetime.now().isoformat()
+        self.created_at = int(datetime.now().timestamp())
+        self.updated_at = int(datetime.now().timestamp())
         
         # 진행률
         self.progress_percentage = 0.0
@@ -139,7 +139,7 @@ class ChatStateManager:
             # step_history에 Enum만 추가
             if not self.step_history or self.step_history[-1] != self.current_step:
                 self.step_history.append(self.current_step)
-            self.updated_at = datetime.now().isoformat()
+            self.updated_at = int(datetime.now().timestamp())
             self._update_progress()
             return self.current_step
         return self.current_step
@@ -155,7 +155,7 @@ class ChatStateManager:
         self.current_step = step
         if step not in self.step_history:
             self.step_history.append(step)
-        self.updated_at = datetime.now().isoformat()
+        self.updated_at = int(datetime.now().timestamp())
         self._update_progress()
         return step
     
@@ -163,17 +163,17 @@ class ChatStateManager:
         """수집된 데이터 업데이트"""
         if key in self.collected_data:
             self.collected_data[key] = value
-            self.updated_at = datetime.now().isoformat()
+            self.updated_at = int(datetime.now().timestamp())
     
     def add_role_input(self, role: str, text: str):
         """역할별 입력 기록"""
         if role in self.role_inputs:
             self.role_inputs[role].append({
                 "text": text,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": int(datetime.now().timestamp()),
                 "step": self.current_step.value
             })
-            self.updated_at = datetime.now().isoformat()
+            self.updated_at = int(datetime.now().timestamp())
     
     def add_conflict(self, description: str, client_position: str, designer_position: str):
         """충돌 사항 기록"""
@@ -182,17 +182,17 @@ class ChatStateManager:
             "description": description,
             "client_position": client_position,
             "designer_position": designer_position,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": int(datetime.now().timestamp()),
             "resolved": False
         })
         self.jump_to_step(ChatStep.CONFLICT_RESOLUTION)
-        self.updated_at = datetime.now().isoformat()
+        self.updated_at = int(datetime.now().timestamp())
     
     def resolve_conflict(self, conflict_idx: int):
         """충돌 해결 표시"""
         if 0 <= conflict_idx < len(self.conflicts):
             self.conflicts[conflict_idx]["resolved"] = True
-            self.updated_at = datetime.now().isoformat()
+            self.updated_at = int(datetime.now().timestamp())
     
     def get_status(self) -> Dict[str, Any]:
         """현재 상태 조회"""
@@ -246,8 +246,8 @@ class ChatStateManager:
             "provider": role_inputs_data.get("provider") or role_inputs_data.get("을") or [],
         }
         manager.conflicts = data.get("conflicts", [])
-        manager.created_at = data.get("created_at", datetime.now().isoformat())
-        manager.updated_at = data.get("updated_at", datetime.now().isoformat())
+        manager.created_at = data.get("created_at", int(datetime.now().timestamp()))
+        manager.updated_at = data.get("updated_at", int(datetime.now().timestamp()))
         
         # 진행률 복원
         if "progress_percentage" in data:

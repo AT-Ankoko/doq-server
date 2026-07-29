@@ -25,7 +25,7 @@ async def send_message(websocket, role: str, event: str, text: str = None, promp
         "hd": {
             "event": event,
             "role": role,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": int(datetime.now().timestamp())
         },
         "bd": {}
     }

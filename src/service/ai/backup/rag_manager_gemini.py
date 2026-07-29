@@ -22,7 +22,7 @@ class RAGManager:
         self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-004", google_api_key=GEMINI_API_KEY)
         self.vector_store = self._load_or_create_index()
         self.initialized = True
-
+        
     def _load_or_create_index(self):
         if os.path.exists(self.index_path):
             try:
